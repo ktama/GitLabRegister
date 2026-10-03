@@ -1,0 +1,10 @@
+[package]
+name = "gitlabregister-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "繰り返しタスクの展開と検証を行う副作用のないコア層 (ADR-02)"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }

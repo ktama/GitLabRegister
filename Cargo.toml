@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/core", "crates/infra", "crates/app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+
+[workspace.dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+reqwest = { version = "0.13", features = ["json", "query"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros"] }
+gitlabregister-core = { path = "crates/core" }
+gitlabregister-infra = { path = "crates/infra" }

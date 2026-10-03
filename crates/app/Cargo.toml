@@ -1,0 +1,18 @@
+[package]
+name = "gitlabregister-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "サービス層とコマンド境界 (設計書 4.1)"
+
+[dependencies]
+gitlabregister-core = { workspace = true }
+gitlabregister-infra = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+gitlabregister-infra = { workspace = true, features = ["testing"] }

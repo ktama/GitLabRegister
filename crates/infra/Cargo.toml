@@ -1,0 +1,21 @@
+[package]
+name = "gitlabregister-infra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "永続化・ログ・秘密保持を担うインフラ層 (ADR-03、ADR-04)"
+
+[dependencies]
+gitlabregister-core = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+# 試験用の差し替え実装を公開する。本番の配布には含めない。
+testing = []
