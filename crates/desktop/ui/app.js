@@ -6,13 +6,26 @@
 
 import * as api from "./api.js";
 import { PreviewGrid } from "./grid.js";
+import { buildCatalog, candidatePicker, projectSelect } from "./pickers.js";
 import { $, confirmAction, el, fill, notify, notifyFailure, promptText, text } from "./ui.js";
 
 const state = {
   connection: null,
   schedules: [],
+  projects: [],
   lastBatch: null,
 };
+
+/** 登録先の一覧を読み直す。選択欄の選択肢に使う (FR-02)。 */
+async function refreshProjects() {
+  try {
+    state.projects = await api.listProjects();
+  } catch (error) {
+    notifyFailure(error);
+    state.projects = [];
+  }
+  return state.projects;
+}
 
 // ---- 画面の切り替え (NFR-15: キーボードだけで到達できる) ----
 
@@ -278,7 +291,8 @@ $("#btn-import-schedules").addEventListener("click", async () => {
 });
 
 // 定義の編集。項目はコア層の検証に任せ、画面は入力の受け渡しに徹する。
-function openEditor(schedule) {
+async function openEditor(schedule) {
+  await refreshProjects();
   const host = $("#schedule-editor");
   host.hidden = false;
   const draft = schedule
@@ -309,20 +323,71 @@ function openEditor(schedule) {
   const form = el("div", { class: "form" });
   form.append(el("h3", {}, [text(schedule ? "定義の編集" : "定義の新規作成")]));
   const nameField = inputField("名称", draft.name, (v) => (draft.name = v));
-  const projectField = inputField("登録先プロジェクト", draft.project, (v) => (draft.project = v));
-  const titleField = inputField("Issue のタイトル", draft.issue.title, (v) => (draft.issue.title = v));
-  form.append(nameField, projectField, titleField);
+  form.append(nameField);
+
+  // FR-02: 登録先は登録済みの一覧から選ぶ。自由入力にしない。
+  const pickers = [];
+  form.append(
+    projectSelect("登録先プロジェクト", state.projects, draft.project, (v) => {
+      draft.project = v;
+      // 登録先が変わると候補も変わる (FR-16)。
+      for (const picker of pickers) picker.reloadFor(v);
+    }),
+  );
+
+  form.append(inputField("Issue のタイトル", draft.issue.title, (v) => (draft.issue.title = v)));
   form.append(
     textareaField("説明", draft.issue.description, (v) => (draft.issue.description = v)),
   );
-  form.append(
-    inputField("ラベル (読点で区切る)", draft.issue.labels.join(", "), (v) => {
-      draft.issue.labels = v
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    }),
-  );
+
+  // FR-16: ラベル・担当者・マイルストーン・エピック・イテレーションは候補から選ぶ。
+  const labelPicker = candidatePicker({
+    label: "ラベル",
+    project: draft.project,
+    kind: "label",
+    multiple: true,
+    // GitLab-EE はラベルを名前で受け取る。EC-32 の突合も名前で行う。
+    useName: true,
+    value: draft.issue.labels,
+    onChange: (ids) => (draft.issue.labels = ids),
+  });
+  const assigneePicker = candidatePicker({
+    label: "担当者",
+    project: draft.project,
+    kind: "member",
+    multiple: true,
+    value: draft.issue.assignees,
+    onChange: (ids) => (draft.issue.assignees = ids),
+  });
+  const milestonePicker = candidatePicker({
+    label: "マイルストーン",
+    project: draft.project,
+    kind: "milestone",
+    multiple: false,
+    // GitLab-EE はマイルストーンを名称で受け取る。
+    useName: true,
+    value: draft.issue.milestone ? [draft.issue.milestone] : [],
+    onChange: (ids) => (draft.issue.milestone = ids[0] ?? null),
+  });
+  const epicPicker = candidatePicker({
+    label: "エピック (EE 固有項目)",
+    project: draft.project,
+    kind: "epic",
+    multiple: false,
+    value: draft.issue.epic ? [draft.issue.epic] : [],
+    onChange: (ids) => (draft.issue.epic = ids[0] ?? null),
+  });
+  const iterationPicker = candidatePicker({
+    label: "イテレーション (EE 固有項目)",
+    project: draft.project,
+    kind: "iteration",
+    multiple: false,
+    value: draft.issue.iteration ? [draft.issue.iteration] : [],
+    onChange: (ids) => (draft.issue.iteration = ids[0] ?? null),
+  });
+  pickers.push(labelPicker, assigneePicker, milestonePicker, epicPicker, iterationPicker);
+  form.append(labelPicker, assigneePicker, milestonePicker);
+
   form.append(
     numberField("開始日オフセット (日)", draft.issue.start_offset_days, (v) => {
       draft.issue.start_offset_days = v;
@@ -333,6 +398,32 @@ function openEditor(schedule) {
       draft.issue.due_offset_days = v;
     }),
   );
+  form.append(
+    checkField("機密 Issue にする", draft.issue.confidential, (v) => {
+      draft.issue.confidential = v;
+    }),
+  );
+
+  // EC-15: ライセンスティアが許さない場合は EE 固有項目を入力できないようにする。
+  const eeAllowed = state.connection ? state.connection.allows_ee_fields : true;
+  const eeBox = el("fieldset");
+  eeBox.append(el("legend", {}, [text("EE 固有項目")]));
+  if (eeAllowed) {
+    eeBox.append(epicPicker, iterationPicker);
+    eeBox.append(
+      numberField("ウェイト", draft.issue.weight, (v) => (draft.issue.weight = v)),
+    );
+  } else {
+    eeBox.append(
+      el("p", { class: "hint" }, [
+        text(
+          "ライセンスティアがエピック・イテレーション・ウェイト・複数担当者を許可していないため入力できません。",
+        ),
+      ]),
+    );
+  }
+  form.append(eeBox);
+
   form.append(patternEditor(draft));
   form.append(
     selectField(
@@ -404,6 +495,13 @@ function numberField(label, value, onInput) {
     onInput(Number.isNaN(parsed) ? null : parsed);
   });
   return el("label", {}, [text(label), field]);
+}
+
+function checkField(label, value, onChange) {
+  const field = el("input", { type: "checkbox" });
+  field.checked = !!value;
+  field.addEventListener("change", () => onChange(field.checked));
+  return el("label", { class: "check" }, [field, text(label)]);
 }
 
 function dateField(label, value, onChange) {
@@ -568,7 +666,11 @@ $("#btn-expand").addEventListener("click", async () => {
   }
   try {
     const preview = await api.expand(start, end);
-    grid.load(preview);
+    // FR-08 / FR-16: 行の編集で候補から選べるようにする。
+    // 候補はプロジェクトごとに 1 つ作り、全ての行から参照する (行数に比例させない)。
+    const projects = [...new Set(preview.candidates.map((c) => c.project))];
+    const catalog = await buildCatalog(projects);
+    grid.load(preview, catalog);
     $("#result-panel").hidden = true;
     const warnings = $("#preview-warnings");
     if (preview.no_enabled_schedules) {
@@ -721,13 +823,15 @@ function renderResults(batch) {
 
 // ---- 単発登録 (FR-12) ----
 
-function renderSingleForm() {
+async function renderSingleForm() {
+  await refreshProjects();
+  const today = new Date().toISOString().slice(0, 10);
   const draft = {
     schedule_id: "single",
     schedule_name: "単発登録",
     project: "",
-    occurrence_date: new Date().toISOString().slice(0, 10),
-    original_date: new Date().toISOString().slice(0, 10),
+    occurrence_date: today,
+    original_date: today,
     title: "",
     description: "",
     labels: [],
@@ -741,18 +845,57 @@ function renderSingleForm() {
     weight: null,
   };
   const host = $("#single-form");
+  const pickers = [];
+
+  // FR-02: 登録先は一覧から選ぶ。
+  const projectField = projectSelect("登録先プロジェクト", state.projects, "", (v) => {
+    draft.project = v;
+    for (const picker of pickers) picker.reloadFor(v);
+  });
+
+  // FR-16: ラベル・担当者・マイルストーンは候補から選ぶ。
+  const labelPicker = candidatePicker({
+    label: "ラベル",
+    project: "",
+    kind: "label",
+    multiple: true,
+    useName: true,
+    value: [],
+    onChange: (names) => (draft.labels = names),
+  });
+  const assigneePicker = candidatePicker({
+    label: "担当者",
+    project: "",
+    kind: "member",
+    multiple: true,
+    value: [],
+    onChange: (ids) => {
+      draft.assignee_ids = ids
+        .map((id) => Number.parseInt(id, 10))
+        .filter((n) => !Number.isNaN(n));
+    },
+  });
+  const milestonePicker = candidatePicker({
+    label: "マイルストーン",
+    project: "",
+    kind: "milestone",
+    multiple: false,
+    useName: true,
+    value: [],
+    onChange: (ids) => (draft.milestone = ids[0] ?? null),
+  });
+  pickers.push(labelPicker, assigneePicker, milestonePicker);
+
   const parts = [
-    inputField("登録先プロジェクト", draft.project, (v) => (draft.project = v)),
+    projectField,
     inputField("タイトル", draft.title, (v) => (draft.title = v)),
     textareaField("説明", draft.description, (v) => (draft.description = v)),
-    inputField("ラベル (読点で区切る)", "", (v) => {
-      draft.labels = v
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    }),
+    labelPicker,
+    assigneePicker,
+    milestonePicker,
     dateField("開始日", draft.start_date, (v) => (draft.start_date = v)),
     dateField("期限", draft.due_date, (v) => (draft.due_date = v)),
+    checkField("機密 Issue にする", draft.confidential, (v) => (draft.confidential = v)),
   ];
   const register = button("登録する", async () => {
     try {

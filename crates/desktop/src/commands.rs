@@ -210,13 +210,12 @@ fn to_preview_view(preview: Preview, schedules: &[Schedule]) -> PreviewView {
                     start_date: c.occurrence.start_date,
                     due_date: c.occurrence.due_date,
                     labels: template.labels.clone(),
-                    // 担当者・エピック・イテレーションは識別子の対応付けが必要なため、
-                    // 画面で候補から選んだ値を行へ入れる。定義からは引き継がない。
-                    assignee_ids: Vec::new(),
+                    // 定義には候補の識別子を保存している (FR-16)。登録に使う形へ直す。
+                    assignee_ids: parse_ids(&template.assignees),
                     milestone: template.milestone.clone(),
                     confidential: template.confidential,
-                    epic_id: None,
-                    iteration_id: None,
+                    epic_id: template.epic.as_deref().and_then(parse_id),
+                    iteration_id: template.iteration.as_deref().map(to_iteration_gid),
                     weight: template.weight,
                 }
             })
@@ -318,6 +317,26 @@ fn to_batch_view(outcome: &BatchOutcome) -> BatchView {
                 }
             })
             .collect(),
+    }
+}
+
+/// 候補の識別子を数値へ直す。数値でないものは無視する。
+fn parse_id(value: &str) -> Option<u64> {
+    value.trim().parse().ok()
+}
+
+fn parse_ids(values: &[String]) -> Vec<u64> {
+    values.iter().filter_map(|v| parse_id(v)).collect()
+}
+
+/// イテレーションの識別子を GraphQL が受け取る形へ直す (ADR-05)。
+///
+/// 候補は REST から取るため数値で返る。既に GraphQL の形であればそのまま使う。
+fn to_iteration_gid(value: &str) -> String {
+    if value.starts_with("gid://") {
+        value.to_string()
+    } else {
+        format!("gid://gitlab/Iteration/{value}")
     }
 }
 

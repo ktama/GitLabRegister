@@ -31,6 +31,14 @@ function charCount(value) {
   return Array.from(value ?? "").length;
 }
 
+/** 候補一覧を引くための名前。プロジェクト名をそのまま使えないので符号化する。 */
+function catalogId(project, kind) {
+  const safe = Array.from(project)
+    .map((c) => c.codePointAt(0).toString(16))
+    .join("");
+  return `cat-${kind}-${safe}`;
+}
+
 export class PreviewGrid {
   /**
    * @param {HTMLElement} host 表を置く場所
@@ -42,17 +50,41 @@ export class PreviewGrid {
     /** @type {Array<{row: object, selected: boolean, excluded: boolean}>} */
     this.entries = [];
     this.showExcluded = false;
+    /** プロジェクトごとの候補 (FR-16)。 */
+    this.catalog = {};
   }
 
-  /** 展開結果を取り込む。 */
-  load(preview) {
+  /** 展開結果と候補を取り込む。 */
+  load(preview, catalog = {}) {
     this.entries = preview.candidates.map((row) => ({
       row: structuredClone(row),
       selected: true,
       excluded: false,
     }));
     this.excluded = preview.excluded ?? [];
+    this.catalog = catalog;
     this.render();
+  }
+
+  /**
+   * 候補一覧を 1 組だけ作る (FR-16)。
+   *
+   * 各行に選択欄を置くと要素数が行数に比例して増える。
+   * 共有の一覧を参照させることで、候補の要素数は行数に依存しなくなる。
+   */
+  renderCatalog() {
+    const lists = [];
+    for (const [project, sets] of Object.entries(this.catalog)) {
+      for (const [key, values] of Object.entries(sets)) {
+        const id = catalogId(project, key);
+        const node = el("datalist", { id });
+        for (const value of values) {
+          node.append(el("option", { value }));
+        }
+        lists.push(node);
+      }
+    }
+    return lists;
   }
 
   /** 結果一覧から失敗した行だけを残す (FR-20)。 */
@@ -111,6 +143,9 @@ export class PreviewGrid {
       return;
     }
 
+    for (const list of this.renderCatalog()) {
+      this.host.append(list);
+    }
     const table = el("table", { class: "grid" });
     const head = el("tr");
     for (const column of COLUMNS) {
@@ -132,6 +167,11 @@ export class PreviewGrid {
     body.append(fragment);
     table.append(body);
     this.host.append(table);
+  }
+
+  hasCatalog(project, kind) {
+    const values = this.catalog?.[project]?.[kind];
+    return Array.isArray(values) && values.length > 0;
   }
 
   renderRow(entry, index) {
@@ -190,10 +230,15 @@ export class PreviewGrid {
       }
       case "text":
       case "text-opt": {
-        const field = el("input", {
+        const attrs = {
           type: "text",
           "aria-label": `${column.label} (${row.schedule_name} ${row.occurrence_date})`,
-        });
+        };
+        // FR-16: マイルストーンは候補から選べるようにする。自由入力も残す。
+        if (column.key === "milestone" && this.hasCatalog(row.project, "milestones")) {
+          attrs.list = catalogId(row.project, "milestones");
+        }
+        const field = el("input", attrs);
         field.value = row[column.key] ?? "";
         field.addEventListener("input", () => {
           row[column.key] = column.kind === "text-opt" && field.value === "" ? null : field.value;
@@ -218,10 +263,15 @@ export class PreviewGrid {
         break;
       }
       case "list": {
-        const field = el("input", {
+        const attrs = {
           type: "text",
           "aria-label": `${column.label} (読点で区切る)`,
-        });
+        };
+        // FR-16: ラベルは候補から選べるようにする。複数指定のため読点で区切る。
+        if (column.key === "labels" && this.hasCatalog(row.project, "labels")) {
+          attrs.list = catalogId(row.project, "labels");
+        }
+        const field = el("input", attrs);
         field.value = (row[column.key] ?? []).join(", ");
         field.addEventListener("input", () => {
           row[column.key] = field.value

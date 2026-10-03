@@ -201,3 +201,26 @@ table.list .row-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 .status-not_attempted { color: var(--warn-fg); }
 
 .empty { color: var(--muted); }
+
+/* 候補からの選択 (FR-02、FR-16)。
+   一覧は高さを抑えて中で転がす。項目が増えても画面が伸びないようにする。 */
+.picker { display: flex; flex-direction: column; gap: 0.3rem; }
+.picker-list {
+  max-height: 10rem;
+  overflow: auto;
+  border: 0.0625rem solid var(--line);
+  border-radius: 0.25rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.picker-foot {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.picker-foot .hint { margin: 0; flex: 1 1 12rem; }
+.form fieldset .picker-list { max-height: 8rem; }
