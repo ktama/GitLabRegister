@@ -265,7 +265,7 @@ impl Boundary {
         let tier = self.current_tier();
         let outcome = self
             .registration
-            .retry_failed(client, previous, &items, tier, now, cancel, progress)
+            .retry_failed(client, previous, tier, now, cancel, progress)
             .await;
         self.after_batch(&outcome);
         Ok(outcome)

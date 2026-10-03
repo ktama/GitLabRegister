@@ -354,18 +354,21 @@ impl RegistrationService {
     }
 
     /// 失敗した行のみを再実行する (FR-20)。
+    ///
+    /// 対象は前回の結果のうち失敗した行である。呼び出し側に別途渡させると、
+    /// 前回の結果と対象が食い違う余地が生まれるため、ここで前回の結果から求める。
     pub async fn retry_failed<T: HttpTransport>(
         &self,
         client: &GitLabClient<T>,
         previous: &BatchOutcome,
-        items: &[RegistrationItem],
         tier: Tier,
         now: NaiveDateTime,
         cancel: &CancellationToken,
         progress: Option<ProgressSink>,
     ) -> BatchOutcome {
+        let items = previous.failed_items();
         let retried = self
-            .register_batch(client, items, tier, now, cancel, progress)
+            .register_batch(client, &items, tier, now, cancel, progress)
             .await;
 
         // 既に成功している行は処理せず、前回の結果をそのまま残す。
@@ -960,7 +963,6 @@ mod tests {
             .retry_failed(
                 &retry_client,
                 &first,
-                &failed,
                 Tier::PremiumOrAbove,
                 now(),
                 &CancellationToken::new(),

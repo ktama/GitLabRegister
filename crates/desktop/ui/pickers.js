@@ -6,6 +6,39 @@
 import * as api from "./api.js";
 import { el, fill, notifyFailure, text } from "./ui.js";
 
+/**
+ * 候補を画面に出すときの名前 (計画 9)。
+ *
+ * イテレーションは名前より期間で見分けるため、期間を持つものは期間を併記する。
+ * 題名がなく期間を名前にしている候補には、同じ期間を重ねて付けない。
+ */
+export function candidateLabel(item) {
+  if (!item.start_date || !item.due_date) return item.name;
+  const period = `${item.start_date}〜${item.due_date}`;
+  return item.name === period ? period : `${item.name} (${period})`;
+}
+
+/**
+ * 候補を画面に並べる順 (計画 9)。
+ *
+ * イテレーションは、進行中と今後のものを開始日の早い順に先に並べ、終わったものを新しい順に後ろへ回す。
+ * 期間を持たない候補は最後に置く。ほかの種別は取得した順のままにする。
+ */
+export function orderCandidates(kind, items, today = new Date().toISOString().slice(0, 10)) {
+  if (kind !== "iteration") return items;
+  const rank = (item) => {
+    if (!item.start_date || !item.due_date) return 2;
+    return item.due_date >= today ? 0 : 1;
+  };
+  return [...items].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    if (rank(a) === 0) return a.start_date.localeCompare(b.start_date);
+    if (rank(a) === 1) return b.start_date.localeCompare(a.start_date);
+    return 0;
+  });
+}
+
 /** 登録先プロジェクトの選択 (FR-02)。登録済みの一覧から選ぶ。 */
 export function projectSelect(labelText, projects, current, onChange) {
   const select = el("select");
@@ -117,8 +150,8 @@ export function candidatePicker(options) {
   function singleSelect() {
     const select = el("select");
     select.append(el("option", { value: "" }, [text("(指定しない)")]));
-    for (const item of list.items) {
-      select.append(el("option", { value: candidateValue(item) }, [text(item.name)]));
+    for (const item of orderCandidates(options.kind, list.items)) {
+      select.append(el("option", { value: candidateValue(item) }, [text(candidateLabel(item))]));
     }
     const current = selected[0] ?? "";
     if (current && !list.items.some((i) => candidateValue(i) === current)) {
@@ -190,18 +223,44 @@ export function candidatePicker(options) {
  * これにより候補の要素は行数に比例しない。
  */
 export async function buildCatalog(projects) {
+  // 名称で指定する項目は名前の一覧、識別子で指定する項目は識別子と名前の対で持つ。
+  // 表では名前で見せて編集し、登録の直前に識別子へ戻す (設計書 6.2)。
+  const byName = [
+    ["label", "labels"],
+    ["milestone", "milestones"],
+  ];
+  const byId = [
+    ["member", "members"],
+    ["epic", "epics"],
+    ["iteration", "iterations"],
+  ];
   const catalog = {};
   for (const project of projects) {
-    catalog[project] = { labels: [], milestones: [] };
-    for (const [kind, key] of [
-      ["label", "labels"],
-      ["milestone", "milestones"],
-    ]) {
+    catalog[project] = {
+      labels: [],
+      milestones: [],
+      members: [],
+      epics: [],
+      iterations: [],
+    };
+    for (const [kind, key] of byName) {
       try {
         const list = await api.candidates(project, kind);
         catalog[project][key] = list.items.map((i) => i.name);
       } catch {
         // 取得できない場合は空のままにする。入力は自由入力として続けられる。
+      }
+    }
+    for (const [kind, key] of byId) {
+      try {
+        const list = await api.candidates(project, kind);
+        catalog[project][key] = orderCandidates(kind, list.items).map((i) => ({
+          id: i.id,
+          name: i.name,
+          label: candidateLabel(i),
+        }));
+      } catch {
+        // 同上。
       }
     }
   }

@@ -6,7 +6,7 @@
 //! 起動時には取得しない。選択欄を開くまで読み込まないことで
 //! NFR-03 (起動から接続画面の操作まで 5 秒以内) の予算を使わない (ADR-07)。
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDate, NaiveDateTime};
 use gitlabregister_infra::atomic::StoreError;
 use gitlabregister_infra::gitlab::client::{Candidate, CandidateKind, GitLabClient};
 use gitlabregister_infra::gitlab::transport::HttpTransport;
@@ -65,6 +65,20 @@ impl CandidateList {
     /// ラベル名の一覧。EC-32 の突合に渡す。
     pub fn names(&self) -> Vec<String> {
         self.items.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// 発生日を含むイテレーション (計画 9、D-28)。期間の両端の日を含む。
+    ///
+    /// 期間が重なる候補が複数ある場合は、開始日が早いものを選ぶ。
+    /// 期間を持たない候補 (期間を保持する前の取得分など) は対象にしない。
+    pub fn iteration_containing(&self, date: NaiveDate) -> Option<&Candidate> {
+        self.items
+            .iter()
+            .filter(|c| match (c.start_date, c.due_date) {
+                (Some(start), Some(due)) => start <= date && date <= due,
+                _ => false,
+            })
+            .min_by_key(|c| c.start_date)
     }
 }
 
@@ -185,7 +199,67 @@ fn find<'a>(
 mod tests {
     use super::*;
     use crate::testing::{client_with, ok, status};
-    use chrono::NaiveDate;
+
+    fn iteration(id: &str, start: (i32, u32, u32), due: (i32, u32, u32)) -> Candidate {
+        let date = |(y, m, d): (i32, u32, u32)| NaiveDate::from_ymd_opt(y, m, d);
+        Candidate {
+            id: id.into(),
+            name: format!("it-{id}"),
+            start_date: date(start),
+            due_date: date(due),
+        }
+    }
+
+    fn iterations(items: Vec<Candidate>) -> CandidateList {
+        CandidateList {
+            items,
+            freshness: Freshness::NeverFetched,
+        }
+    }
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("有効な日付")
+    }
+
+    /// 計画 9: 期間の内側の日と、両端の日はそのイテレーションに入る。
+    #[test]
+    fn iteration_containing_includes_both_ends() {
+        let list = iterations(vec![
+            iteration("1", (2026, 10, 1), (2026, 10, 14)),
+            iteration("2", (2026, 10, 15), (2026, 10, 28)),
+        ]);
+        let id = |d| list.iteration_containing(d).map(|c| c.id.as_str());
+        assert_eq!(id(ymd(2026, 10, 1)), Some("1"));
+        assert_eq!(id(ymd(2026, 10, 9)), Some("1"));
+        assert_eq!(id(ymd(2026, 10, 14)), Some("1"));
+        assert_eq!(id(ymd(2026, 10, 15)), Some("2"));
+    }
+
+    /// 計画 9: どの期間にも入らない日と、期間を持たない候補は割り当てない。
+    #[test]
+    fn iteration_containing_none_outside_or_without_period() {
+        let list = iterations(vec![
+            iteration("1", (2026, 10, 1), (2026, 10, 14)),
+            Candidate {
+                id: "9".into(),
+                name: "期間なし".into(),
+                ..Candidate::default()
+            },
+        ]);
+        assert!(list.iteration_containing(ymd(2026, 9, 30)).is_none());
+        assert!(list.iteration_containing(ymd(2026, 11, 1)).is_none());
+    }
+
+    /// 計画 9: 期間が重なる場合は開始日の早いものを選ぶ。候補の並び順に左右されない。
+    #[test]
+    fn iteration_containing_prefers_earliest_start_on_overlap() {
+        let list = iterations(vec![
+            iteration("late", (2026, 10, 8), (2026, 10, 21)),
+            iteration("early", (2026, 10, 1), (2026, 10, 14)),
+        ]);
+        let got = list.iteration_containing(ymd(2026, 10, 10)).map(|c| c.id.as_str());
+        assert_eq!(got, Some("early"));
+    }
     use gitlabregister_infra::gitlab::transport::TransportError;
     use gitlabregister_infra::paths::AppPaths;
 
@@ -353,10 +427,12 @@ mod tests {
                 Candidate {
                     id: "1".into(),
                     name: "Report".into(),
+                    ..Candidate::default()
                 },
                 Candidate {
                     id: "2".into(),
                     name: "monthly".into(),
+                    ..Candidate::default()
                 },
             ],
             freshness: Freshness::NeverFetched,

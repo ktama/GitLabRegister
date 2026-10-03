@@ -19,3 +19,4 @@ gitlabregister-infra = { path = "crates/infra" }
 gitlabregister-app = { path = "crates/app" }
 tauri = { version = "2.12", features = [] }
 tauri-build = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

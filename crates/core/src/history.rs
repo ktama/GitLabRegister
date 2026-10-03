@@ -137,7 +137,7 @@ mod tests {
     /// EC-26: 定義を削除しても履歴から定義名が読める (非正規化して保持)。
     #[test]
     fn history_entry_keeps_schedule_name() {
-        let entries = vec![entry("X", "削除された定義", d(2026, 10, 5))];
+        let entries = [entry("X", "削除された定義", d(2026, 10, 5))];
         assert_eq!(entries[0].schedule_name, "削除された定義");
     }
 

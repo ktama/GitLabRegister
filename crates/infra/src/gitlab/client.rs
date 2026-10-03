@@ -155,10 +155,16 @@ pub enum CandidateKind {
 }
 
 /// 候補値 1 件。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Candidate {
     pub id: String,
     pub name: String,
+    /// イテレーションの期間。発生日を含むイテレーションを選ぶのに使う (計画 9)。
+    /// 期間を持たない種別と、期間を保持する前の保持データでは空になる。
+    #[serde(default)]
+    pub start_date: Option<NaiveDate>,
+    #[serde(default)]
+    pub due_date: Option<NaiveDate>,
 }
 
 /// GitLab-EE との通信。
@@ -347,6 +353,7 @@ impl<T: HttpTransport> GitLabClient<T> {
         Ok(Candidate {
             id: project.id.to_string(),
             name: project.path_with_namespace,
+            ..Candidate::default()
         })
     }
 
@@ -361,12 +368,47 @@ impl<T: HttpTransport> GitLabClient<T> {
             CandidateKind::Label => format!("/api/v4/projects/{encoded}/labels"),
             CandidateKind::Member => format!("/api/v4/projects/{encoded}/members/all"),
             CandidateKind::Milestone => format!("/api/v4/projects/{encoded}/milestones"),
-            CandidateKind::Epic => format!("/api/v4/projects/{encoded}/epics"),
+            CandidateKind::Epic => return self.fetch_epic_candidates(&encoded).await,
             CandidateKind::Iteration => format!("/api/v4/projects/{encoded}/iterations"),
         };
         let request = HttpRequest::get(path).with_query("per_page", "100");
         let items: Vec<serde_json::Value> = self.send_json(request, "候補の取得").await?;
         Ok(items.iter().filter_map(|i| to_candidate(i, kind)).collect())
+    }
+
+    /// エピックの候補 (FR-16、計画 10)。
+    ///
+    /// GitLab のエピックはグループの機能で、プロジェクト単位の取得口はない。
+    /// プロジェクトの属するグループを調べ、そのグループと上位グループのエピックを取る。
+    /// 個人の名前空間に置かれたプロジェクトにはエピックがないため、2 回目の通信をせずに 0 件を返す。
+    async fn fetch_epic_candidates(&self, encoded: &str) -> Result<Vec<Candidate>, GitLabError> {
+        #[derive(Deserialize)]
+        struct Namespace {
+            id: u64,
+            kind: String,
+        }
+        #[derive(Deserialize)]
+        struct ProjectBody {
+            namespace: Namespace,
+        }
+        let project: ProjectBody = self
+            .send_json(
+                HttpRequest::get(format!("/api/v4/projects/{encoded}")),
+                "候補の取得",
+            )
+            .await?;
+        if project.namespace.kind != "group" {
+            return Ok(Vec::new());
+        }
+        let request =
+            HttpRequest::get(format!("/api/v4/groups/{}/epics", project.namespace.id))
+                .with_query("include_ancestor_groups", "true")
+                .with_query("per_page", "100");
+        let items: Vec<serde_json::Value> = self.send_json(request, "候補の取得").await?;
+        Ok(items
+            .iter()
+            .filter_map(|i| to_candidate(i, CandidateKind::Epic))
+            .collect())
     }
 
     /// 応答を型へ読み取る。
@@ -499,18 +541,57 @@ fn issue_body(issue: &NewIssue) -> serde_json::Value {
 }
 
 fn to_candidate(value: &serde_json::Value, kind: CandidateKind) -> Option<Candidate> {
+    let id = match value.get("id") {
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        Some(serde_json::Value::String(s)) => s.clone(),
+        _ => return None,
+    };
+    if kind == CandidateKind::Iteration {
+        return to_iteration_candidate(value, id);
+    }
     let name_key = match kind {
         CandidateKind::Label => "name",
         CandidateKind::Member => "username",
         CandidateKind::Milestone | CandidateKind::Epic | CandidateKind::Iteration => "title",
     };
     let name = value.get(name_key)?.as_str()?.to_string();
-    let id = match value.get("id") {
-        Some(serde_json::Value::Number(n)) => n.to_string(),
-        Some(serde_json::Value::String(s)) => s.clone(),
+    Some(Candidate {
+        id,
+        name,
+        ..Candidate::default()
+    })
+}
+
+/// イテレーションの候補。期間を持たせる。
+///
+/// 周期設定から自動で作られたイテレーションは題名を持たないことが多い。
+/// 題名がなければ期間を名前にし、候補から落とさない。
+fn to_iteration_candidate(value: &serde_json::Value, id: String) -> Option<Candidate> {
+    let date = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+    };
+    let start_date = date("start_date");
+    let due_date = date("due_date");
+    let title = value
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let name = match (title, start_date, due_date) {
+        (Some(title), _, _) => title.to_string(),
+        (None, Some(start), Some(due)) => format!("{start}〜{due}"),
+        // 題名も期間もなければ、利用者が見分けられないため候補にしない。
         _ => return None,
     };
-    Some(Candidate { id, name })
+    Some(Candidate {
+        id,
+        name,
+        start_date,
+        due_date,
+    })
 }
 
 /// プロジェクトの指定に名前空間付きの経路を使えるようにする。
@@ -965,7 +1046,6 @@ mod tests {
                 r#"[{"id":3,"title":"2026Q4"}]"#,
                 "2026Q4",
             ),
-            (CandidateKind::Epic, r#"[{"id":42,"title":"基盤整備"}]"#, "基盤整備"),
             (
                 CandidateKind::Iteration,
                 r#"[{"id":55,"title":"Sprint 12"}]"#,
@@ -978,6 +1058,88 @@ mod tests {
             assert_eq!(got.len(), 1, "{kind:?}");
             assert_eq!(got[0].name, expected, "{kind:?}");
         }
+    }
+
+    /// 計画 10: エピックはプロジェクトの属するグループから、上位グループの分も含めて取る。
+    #[tokio::test]
+    async fn epic_candidates_come_from_project_group() {
+        let c = client(vec![
+            ok(r#"{"id":11,"path_with_namespace":"group/alpha","namespace":{"id":9,"kind":"group","full_path":"group"}}"#),
+            ok(r#"[{"id":42,"iid":3,"title":"基盤整備"}]"#),
+        ]);
+        let got = c
+            .fetch_candidates("group/alpha", CandidateKind::Epic)
+            .await
+            .expect("取得できる");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "42");
+        assert_eq!(got[0].name, "基盤整備");
+
+        let sent = c.transport.sent_requests();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].path, "/api/v4/projects/group%2Falpha");
+        assert_eq!(sent[1].path, "/api/v4/groups/9/epics");
+        assert!(sent[1]
+            .query
+            .contains(&("include_ancestor_groups".to_string(), "true".to_string())));
+    }
+
+    /// 計画 10: 個人の名前空間のプロジェクトにはエピックがない。1 回の通信で 0 件を返す。
+    #[tokio::test]
+    async fn epic_candidates_empty_for_user_namespace() {
+        let c = client(vec![ok(
+            r#"{"id":12,"path_with_namespace":"taro/notes","namespace":{"id":5,"kind":"user","full_path":"taro"}}"#,
+        )]);
+        let got = c
+            .fetch_candidates("taro/notes", CandidateKind::Epic)
+            .await
+            .expect("取得できる");
+        assert!(got.is_empty());
+        assert_eq!(c.transport.sent_count(), 1);
+    }
+
+    /// 計画 9: イテレーションは題名と期間を持つ候補になる。
+    #[tokio::test]
+    async fn iteration_candidate_keeps_title_and_period() {
+        let c = client(vec![ok(
+            r#"[{"id":55,"title":"Sprint 12","start_date":"2026-10-01","due_date":"2026-10-14"}]"#,
+        )]);
+        let got = c
+            .fetch_candidates("11", CandidateKind::Iteration)
+            .await
+            .expect("取得できる");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "55");
+        assert_eq!(got[0].name, "Sprint 12");
+        assert_eq!(got[0].start_date, NaiveDate::from_ymd_opt(2026, 10, 1));
+        assert_eq!(got[0].due_date, NaiveDate::from_ymd_opt(2026, 10, 14));
+    }
+
+    /// 計画 9: 周期設定から作られた題名のないイテレーションを捨てず、期間で名付ける。
+    #[tokio::test]
+    async fn iteration_without_title_is_named_by_period() {
+        let c = client(vec![ok(
+            r#"[{"id":56,"title":null,"start_date":"2026-10-15","due_date":"2026-10-28"},
+                {"id":57,"title":"  ","start_date":"2026-10-29","due_date":"2026-11-11"},
+                {"id":58,"title":null}]"#,
+        )]);
+        let got = c
+            .fetch_candidates("11", CandidateKind::Iteration)
+            .await
+            .expect("取得できる");
+        let names: Vec<_> = got.iter().map(|i| i.name.as_str()).collect();
+        // 題名も期間もない候補は見分けられないため落とす。
+        assert_eq!(names, ["2026-10-15〜2026-10-28", "2026-10-29〜2026-11-11"]);
+    }
+
+    /// 計画 9: 期間を持つ前の保持データ (id と name だけ) をそのまま読める。
+    #[test]
+    fn candidate_cache_without_period_loads() {
+        let got: Candidate =
+            serde_json::from_str(r#"{"id":"1","name":"report"}"#).expect("読める");
+        assert_eq!(got.name, "report");
+        assert_eq!(got.start_date, None);
+        assert_eq!(got.due_date, None);
     }
 
     /// FR-16: 1 回で多く取るため件数を指定する。

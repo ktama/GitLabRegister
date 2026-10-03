@@ -76,6 +76,17 @@ export const importSchedules = (path, overwrite) =>
 export const listHistory = (filter) => call("list_history", filter);
 export const historyDeleteConfirmation = (keys) => call("history_delete_confirmation", { keys });
 export const deleteHistory = (keys) => call("delete_history", { keys });
+export const openIssue = (project, issueReference) =>
+  call("open_issue", { project, issueReference });
+
+// ファイルの選択 (FR-18、FR-22)。OS 標準の選択画面を出し、選ばれた経路を返す。取り消しは null。
+const JSON_FILTER = [{ name: "JSON", extensions: ["json"] }];
+const TEXT_FILTER = [{ name: "テキスト", extensions: ["txt", "csv"] }];
+export const FILE_FILTERS = { json: JSON_FILTER, text: TEXT_FILTER };
+export const chooseFileToOpen = (title, filters) =>
+  call("plugin:dialog|open", { options: { title, filters, multiple: false, directory: false } });
+export const chooseFileToSave = (title, defaultPath, filters) =>
+  call("plugin:dialog|save", { options: { title, defaultPath, filters } });
 
 // 候補 (FR-16)
 export const candidates = (project, kind) => call("candidates", { project, kind });

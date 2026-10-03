@@ -194,7 +194,12 @@ pub struct IssueTemplate {
     pub due_offset_days: Option<u16>,
     pub confidential: bool,
     pub epic: Option<String>,
+    /// 固定で指定するイテレーション。`iteration_by_occurrence` が真のときは使わない。
     pub iteration: Option<String>,
+    /// 真なら、発生日を含むイテレーションを展開時に割り当てる (計画 9、D-28)。
+    /// この項目を持たない定義ファイルは偽 (固定指定) として読む。
+    #[serde(default)]
+    pub iteration_by_occurrence: bool,
     pub weight: Option<u32>,
 }
 

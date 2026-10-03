@@ -38,6 +38,7 @@ fn main() {
     let app_state = state::AppState::new(paths);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::load_settings,
@@ -76,6 +77,7 @@ fn main() {
             commands::delete_history,
             commands::candidates,
             commands::refetch_candidates,
+            commands::open_issue,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri の起動に失敗しました");

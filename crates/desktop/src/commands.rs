@@ -11,11 +11,12 @@ use gitlabregister_app::expansion::{Preview, PreviewWarning};
 use gitlabregister_app::masterdata::HistoryFilter;
 use gitlabregister_app::registration::{BatchOutcome, ItemStatus, Progress, RegistrationItem};
 use gitlabregister_core::expand::RangePreset;
-use gitlabregister_core::model::{Holiday, HistoryEntry, Schedule, ScheduleId};
+use gitlabregister_core::model::{Holiday, HistoryEntry, IssueTemplate, Schedule, ScheduleId};
 use gitlabregister_infra::gitlab::client::CandidateKind;
 use gitlabregister_infra::store::{AppSettings, ImportConflictPolicy, Project};
 use gitlabregister_infra::Level;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -141,12 +142,18 @@ pub struct CandidateRow {
     pub confidential: bool,
     pub epic_id: Option<u64>,
     pub iteration_id: Option<String>,
+    /// 発生日で決める指定なのに、発生日を含むイテレーションが見つからなかった (計画 9)。
+    /// 画面に印を出すためだけに使い、登録には使わない。
+    #[serde(default)]
+    pub iteration_unresolved: bool,
     pub weight: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExcludedRow {
     pub schedule_id: String,
+    /// 画面に出す定義名。定義が見つからない場合は識別子を入れる。
+    pub schedule_name: String,
     pub occurrence_date: NaiveDate,
 }
 
@@ -166,15 +173,49 @@ impl CandidateRow {
             due_date: self.due_date,
             confidential: self.confidential,
             epic_id: self.epic_id,
-            iteration_id: self.iteration_id.clone(),
+            // ADR-05: GraphQL が受け取る形へ直す。候補は REST から取るため数値で返る。
+            iteration_id: self.iteration_id.as_deref().map(to_iteration_gid),
             weight: self.weight,
         }
     }
 }
 
-fn to_preview_view(preview: Preview, schedules: &[Schedule]) -> PreviewView {
+/// 行に入れるイテレーションを決める (計画 9、D-28)。
+///
+/// 固定指定なら定義の識別子をそのまま使う。発生日で決める指定なら、
+/// 保持済みの候補から発生日を含むものを選ぶ。展開は接続なしで行えるため (FR-07)、ここでは取得しない。
+/// 戻り値の 2 つ目は、発生日で決める指定なのに割り当てられなかったことを表す。
+fn assign_iteration(
+    template: &IssueTemplate,
+    date: NaiveDate,
+    iterations: Option<&CandidateList>,
+) -> (Option<String>, bool) {
+    if !template.iteration_by_occurrence {
+        return (template.iteration.clone(), false);
+    }
+    match iterations.and_then(|list| list.iteration_containing(date)) {
+        Some(found) => (Some(found.id.clone()), false),
+        None => (None, true),
+    }
+}
+
+/// 割り当てられなかった行があることの警告。0 件なら出さない。
+fn unresolved_iteration_warning(count: usize) -> Option<String> {
+    (count > 0).then(|| {
+        format!(
+            "発生日を含むイテレーションが見つからない行が {count} 件あります。\
+             定義の編集画面でイテレーションの候補を再取得するか、表で選んでください。"
+        )
+    })
+}
+
+fn to_preview_view(
+    preview: Preview,
+    schedules: &[Schedule],
+    iterations: &BTreeMap<String, CandidateList>,
+) -> PreviewView {
     let can_register = preview.can_register();
-    PreviewView {
+    let mut view = PreviewView {
         can_register,
         no_enabled_schedules: preview.no_enabled_schedules,
         warnings: preview
@@ -187,6 +228,11 @@ fn to_preview_view(preview: Preview, schedules: &[Schedule]) -> PreviewView {
             .iter()
             .map(|(id, date)| ExcludedRow {
                 schedule_id: id.clone(),
+                schedule_name: schedules
+                    .iter()
+                    .find(|s| s.id.0 == *id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| id.clone()),
                 occurrence_date: *date,
             })
             .collect(),
@@ -199,6 +245,11 @@ fn to_preview_view(preview: Preview, schedules: &[Schedule]) -> PreviewView {
                     .find(|s| s.id == c.occurrence.schedule_id)
                     .map(|s| s.issue.clone())
                     .unwrap_or_default();
+                let (iteration_id, iteration_unresolved) = assign_iteration(
+                    &template,
+                    c.occurrence.date,
+                    iterations.get(&c.project),
+                );
                 CandidateRow {
                     schedule_id: c.occurrence.schedule_id.0.clone(),
                     schedule_name: c.schedule_name.clone(),
@@ -215,12 +266,18 @@ fn to_preview_view(preview: Preview, schedules: &[Schedule]) -> PreviewView {
                     milestone: template.milestone.clone(),
                     confidential: template.confidential,
                     epic_id: template.epic.as_deref().and_then(parse_id),
-                    iteration_id: template.iteration.as_deref().map(to_iteration_gid),
+                    // 画面が候補と突き合わせられるよう素の識別子で渡す。
+                    // GraphQL の形への変換は登録の直前 (to_item) で行う (ADR-05)。
+                    iteration_id,
+                    iteration_unresolved,
                     weight: template.weight,
                 }
             })
             .collect(),
-    }
+    };
+    let unresolved = view.candidates.iter().filter(|c| c.iteration_unresolved).count();
+    view.warnings.extend(unresolved_iteration_warning(unresolved));
+    view
 }
 
 /// 画面へ返す一括登録の結果 (FR-10)。
@@ -585,13 +642,29 @@ pub fn expand(
         .schedules
         .list()
         .map_err(UiError::storage)?;
+    // 発生日で決める指定を持つ定義の登録先だけ、保持済みのイテレーション候補を読む。
+    let iterations: BTreeMap<String, CandidateList> = schedules
+        .iter()
+        .filter(|s| s.enabled && s.issue.iteration_by_occurrence)
+        .map(|s| s.project.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|project| {
+            let list = state
+                .boundary
+                .candidates
+                .cached(&project, CandidateKind::Iteration)
+                .ok()?;
+            Some((project, list))
+        })
+        .collect();
     state.log(
         Level::Info,
         "展開",
         &format!("{start} 〜 {end}"),
         &format!("登録候補 {} 件", preview.candidates.len()),
     );
-    Ok(to_preview_view(preview, &schedules))
+    Ok(to_preview_view(preview, &schedules, &iterations))
 }
 
 // ---- 登録 ----
@@ -1066,4 +1139,202 @@ fn new_identifier() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("s{nanos:x}")
+}
+
+// ---- Issue を既定のブラウザで開く (FR-19) ----
+
+/// 接続先 URL、登録先、Issue の参照 (`#12`) から、Issue の画面の URL を組み立てる。
+///
+/// 画面から URL を受け取らないのは、任意の URL やファイルを開けないようにするためである。
+/// 開く先は、利用者が FR-01 で指定した接続先上の Issue に限る (NFR-08)。
+/// 組み立てられない値は `None` を返し、開かない。
+fn issue_url(gitlab_url: &str, project: &str, issue_reference: &str) -> Option<String> {
+    let base = gitlab_url.trim().trim_end_matches('/');
+    // 接続は HTTPS に限っている (ConnectError::Setup)。開く先も揃える。
+    let host = base.strip_prefix("https://")?;
+    if host.is_empty() || base.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return None;
+    }
+    let iid = issue_reference.trim().strip_prefix('#')?;
+    if iid.is_empty() || !iid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    // 登録先は GitLab-EE の path_with_namespace である。使える文字だけを通す。
+    let valid_project = !project.is_empty()
+        && project.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        });
+    if !valid_project {
+        return None;
+    }
+    Some(format!("{base}/{project}/-/issues/{iid}"))
+}
+
+/// URL を OS の既定のブラウザで開く。シェルを介さず、URL を 1 つの引数として渡す。
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    command.spawn().map(|_| ())
+}
+
+#[tauri::command]
+pub fn open_issue(
+    state: State<'_, AppState>,
+    project: String,
+    issue_reference: String,
+) -> UiResult<()> {
+    let settings = state.boundary.settings().map_err(UiError::from)?;
+    let base = settings.gitlab_url.ok_or_else(|| {
+        UiError::input(
+            "接続先 URL が設定されていません",
+            "接続画面で接続先 URL を入力して接続してください",
+        )
+    })?;
+    let target = format!("{project} {issue_reference}");
+    let url = issue_url(&base, &project, &issue_reference).ok_or_else(|| {
+        UiError::input(
+            format!("{target} の画面の URL を組み立てられません"),
+            "接続先 URL が https で始まっているか、履歴の登録先と Issue の識別情報を確認してください",
+        )
+    })?;
+    match open_in_browser(&url) {
+        Ok(()) => {
+            state.log(Level::Info, "Issue を開く", &target, "成功");
+            Ok(())
+        }
+        Err(error) => {
+            state.log(Level::Warn, "Issue を開く", &target, "失敗");
+            Err(UiError {
+                kind: "temporary".into(),
+                message: format!("ブラウザを起動できません: {error}"),
+                next_action: format!("ブラウザを開き、{url} を入力してください"),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{assign_iteration, issue_url, unresolved_iteration_warning};
+    use chrono::NaiveDate;
+    use gitlabregister_app::candidate::{CandidateList, Freshness};
+    use gitlabregister_core::model::IssueTemplate;
+    use gitlabregister_infra::gitlab::client::Candidate;
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("有効な日付")
+    }
+
+    fn sprints() -> CandidateList {
+        CandidateList {
+            items: vec![
+                Candidate {
+                    id: "55".into(),
+                    name: "Sprint 12".into(),
+                    start_date: Some(ymd(2026, 10, 1)),
+                    due_date: Some(ymd(2026, 10, 14)),
+                },
+                Candidate {
+                    id: "56".into(),
+                    name: "Sprint 13".into(),
+                    start_date: Some(ymd(2026, 10, 15)),
+                    due_date: Some(ymd(2026, 10, 28)),
+                },
+            ],
+            freshness: Freshness::NeverFetched,
+        }
+    }
+
+    /// 計画 9: 固定指定は定義の識別子をそのまま使い、候補を見ない。
+    #[test]
+    fn assign_iteration_keeps_fixed_choice() {
+        let template = IssueTemplate {
+            iteration: Some("55".into()),
+            ..IssueTemplate::default()
+        };
+        let got = assign_iteration(&template, ymd(2026, 10, 20), Some(&sprints()));
+        assert_eq!(got, (Some("55".into()), false));
+    }
+
+    /// 計画 9: 発生日で決める指定は、発生日を含むイテレーションを入れる。
+    #[test]
+    fn assign_iteration_by_occurrence_uses_containing_iteration() {
+        let template = IssueTemplate {
+            iteration_by_occurrence: true,
+            ..IssueTemplate::default()
+        };
+        let list = sprints();
+        assert_eq!(
+            assign_iteration(&template, ymd(2026, 10, 3), Some(&list)),
+            (Some("55".into()), false)
+        );
+        assert_eq!(
+            assign_iteration(&template, ymd(2026, 10, 20), Some(&list)),
+            (Some("56".into()), false)
+        );
+    }
+
+    /// 計画 9: 該当がない日、候補を保持していない登録先は、未割り当ての印を付けて警告に数える。
+    #[test]
+    fn assign_iteration_reports_unresolved() {
+        let template = IssueTemplate {
+            iteration_by_occurrence: true,
+            ..IssueTemplate::default()
+        };
+        assert_eq!(
+            assign_iteration(&template, ymd(2026, 11, 2), Some(&sprints())),
+            (None, true)
+        );
+        assert_eq!(assign_iteration(&template, ymd(2026, 10, 3), None), (None, true));
+        assert_eq!(unresolved_iteration_warning(0), None);
+        let warning = unresolved_iteration_warning(3).expect("警告が出る");
+        assert!(warning.contains("3 件"), "{warning}");
+    }
+
+    #[test]
+    fn issue_url_joins_base_project_and_iid() {
+        assert_eq!(
+            issue_url("https://gitlab.example.com/", "group/alpha", "#12").as_deref(),
+            Some("https://gitlab.example.com/group/alpha/-/issues/12"),
+        );
+        // 相対 URL のルート配下に置かれた GitLab-EE も扱う。
+        assert_eq!(
+            issue_url("https://example.com/gitlab", "g/sub/p.x_y-z", "#3").as_deref(),
+            Some("https://example.com/gitlab/g/sub/p.x_y-z/-/issues/3"),
+        );
+    }
+
+    #[test]
+    fn issue_url_rejects_values_that_could_open_other_targets() {
+        assert_eq!(issue_url("http://gitlab.example.com", "g/p", "#1"), None);
+        assert_eq!(issue_url("file:///C:/Windows", "g/p", "#1"), None);
+        assert_eq!(issue_url("https://", "g/p", "#1"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "g/../p", "#1"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "g/p?x=1", "#1"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "", "#1"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "g/p", "12"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "g/p", "#1a"), None);
+        assert_eq!(issue_url("https://gitlab.example.com", "g/p", "#"), None);
+    }
 }

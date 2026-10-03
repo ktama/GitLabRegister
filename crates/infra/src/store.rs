@@ -596,6 +596,20 @@ mod tests {
         assert_eq!(s.load_schedules().expect("読める").len(), 1);
     }
 
+    /// 計画 9 (D-28): 割り当て方の項目を持たない定義は、固定指定として読む。
+    /// 既存の定義ファイルを書き換えずに使い続けられること。
+    #[test]
+    fn template_without_iteration_rule_deserializes() {
+        let old = r#"{
+            "title": "月次報告", "description": "", "labels": [], "assignees": [],
+            "milestone": null, "start_offset_days": null, "due_offset_days": null,
+            "confidential": false, "epic": null, "iteration": "55", "weight": null
+        }"#;
+        let template: IssueTemplate = serde_json::from_str(old).expect("読める");
+        assert_eq!(template.iteration.as_deref(), Some("55"));
+        assert!(!template.iteration_by_occurrence);
+    }
+
     // ---- FR-22 休日の取り込みと書き出し ----
 
     /// FR-22: 20 件書き出して 0 件の端末で取り込むと日付と名称が一致する。
@@ -781,6 +795,7 @@ mod tests {
             items: vec![Candidate {
                 id: "1".into(),
                 name: "report".into(),
+                ..Candidate::default()
             }],
             fetched_at: d(2026, 10, 3).and_hms_opt(14, 0, 0).expect("有効な時刻"),
         }];

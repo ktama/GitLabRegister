@@ -156,9 +156,7 @@ pub fn expand(
         }
     }
 
-    result
-        .candidates
-        .sort_by(|a, b| a.occurrence.date.cmp(&b.occurrence.date));
+    result.candidates.sort_by_key(|c| c.occurrence.date);
     result.warnings.extend(holiday_warnings(
         schedules, &calendar, range, &result.candidates,
     ));

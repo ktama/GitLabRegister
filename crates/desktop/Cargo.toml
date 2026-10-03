@@ -14,6 +14,8 @@ gitlabregister-app = { workspace = true }
 gitlabregister-core = { workspace = true }
 gitlabregister-infra = { workspace = true }
 tauri = { workspace = true }
+# 取り込みと書き出しのファイルを OS 標準の選択画面で選ぶ (FR-18、FR-22)。
+tauri-plugin-dialog = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -208,7 +208,7 @@ impl MasterDataService {
             .into_iter()
             .filter(|e| filter.matches(e))
             .collect();
-        entries.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.registered_at));
         Ok(entries)
     }
 

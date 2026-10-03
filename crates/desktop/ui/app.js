@@ -6,8 +6,14 @@
 
 import * as api from "./api.js";
 import { PreviewGrid } from "./grid.js";
-import { buildCatalog, candidatePicker, projectSelect } from "./pickers.js";
-import { $, confirmAction, el, fill, notify, notifyFailure, promptText, text } from "./ui.js";
+import {
+  buildCatalog,
+  candidateLabel,
+  candidatePicker,
+  orderCandidates,
+  projectSelect,
+} from "./pickers.js";
+import { $, confirmAction, el, fill, notify, notifyFailure, text } from "./ui.js";
 
 const state = {
   connection: null,
@@ -29,7 +35,14 @@ async function refreshProjects() {
 
 // ---- 画面の切り替え (NFR-15: キーボードだけで到達できる) ----
 
-function showScreen(name) {
+/**
+ * 画面を切り替える。
+ *
+ * 定義の編集に保存していない変更があり、利用者が破棄を選ばなかった場合は切り替えない。
+ * @returns {Promise<boolean>} 切り替えたか
+ */
+async function showScreen(name) {
+  if (name !== "schedules" && !(await closeEditor())) return false;
   for (const tab of document.querySelectorAll(".tabs button")) {
     tab.setAttribute("aria-selected", String(tab.dataset.screen === name));
   }
@@ -45,17 +58,54 @@ function showScreen(name) {
     preview: updatePreviewActions,
   };
   loaders[name]?.();
+  return true;
 }
 
-for (const tab of document.querySelectorAll(".tabs button")) {
+const tabs = [...document.querySelectorAll(".tabs button")];
+
+for (const tab of tabs) {
   tab.addEventListener("click", () => showScreen(tab.dataset.screen));
 }
+
+for (const link of document.querySelectorAll("[data-goto]")) {
+  link.addEventListener("click", () => showScreen(link.dataset.goto));
+}
+
+/** 画面を切り替え、その画面のタブへ焦点を移す。 */
+async function focusScreen(tab) {
+  if (await showScreen(tab.dataset.screen)) tab.focus();
+}
+
+// 上下の矢印でタブを順に移る。
+$(".tabs").addEventListener("keydown", (event) => {
+  const index = tabs.indexOf(document.activeElement);
+  if (index < 0) return;
+  const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+  if (!step) return;
+  event.preventDefault();
+  focusScreen(tabs[(index + step + tabs.length) % tabs.length]);
+});
+
+// Ctrl+1〜6 で、サイドナビの並び順の画面へ直接移る。
+document.addEventListener("keydown", (event) => {
+  if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
+  const number = Number.parseInt(event.key, 10);
+  if (Number.isNaN(number) || number < 1 || number > tabs.length) return;
+  event.preventDefault();
+  focusScreen(tabs[number - 1]);
+});
 
 // ---- 接続 (FR-01、NFR-17) ----
 
 function renderConnection(view) {
   state.connection = view;
   $("#conn-summary").textContent = view.description;
+  $("#conn-status").dataset.conn = view.state;
+  // 展開前の案内は接続の有無で文面が変わる。
+  if (!grid.loaded) grid.render();
+  // EC-15: ティアが許さない接続では、表にも EE 固有項目の列を出さない。
+  grid.setEeAllowed(view.allows_ee_fields);
+  renderColumnMenu();
   const detail = $("#conn-detail");
   const notes = [];
   if (!view.can_register) {
@@ -112,7 +162,13 @@ $("#btn-connect").addEventListener("click", async () => {
     );
     renderConnection(result.connection);
     for (const warning of result.warnings) notify(warning, "", false);
-    if (result.warnings.length === 0) notify("接続しました", "", true);
+    if (result.warnings.length === 0) {
+      notify("接続しました", "", true);
+      // 注意事項がなければ、次の作業である展開と登録へ進める。
+      if (result.connection.can_register && (await showScreen("preview"))) {
+        $("#range-start").focus();
+      }
+    }
   } catch (error) {
     notifyFailure(error);
     renderConnection(await api.connectionState());
@@ -154,8 +210,14 @@ async function loadSchedules() {
   );
   const body = el("tbody");
   for (const schedule of state.schedules) {
-    const tr = el("tr");
-    tr.append(el("td", {}, [text(schedule.enabled ? "有効" : "無効")]));
+    const tr = el("tr", schedule.enabled ? {} : { class: "row-off" });
+    tr.append(
+      el("td", {}, [
+        el("span", { class: schedule.enabled ? "chip chip-on" : "chip chip-off" }, [
+          text(schedule.enabled ? "有効" : "無効"),
+        ]),
+      ]),
+    );
     tr.append(el("td", {}, [text(schedule.name)]));
     tr.append(el("td", {}, [text(schedule.project)]));
     tr.append(el("td", {}, [text(describePattern(schedule.pattern))]));
@@ -186,7 +248,13 @@ async function loadSchedules() {
     const del = button("削除", async () => {
       try {
         const message = await api.deleteScheduleConfirmation(idOf(schedule));
-        if (!confirmAction(message)) return;
+        const confirmed = await confirmAction({
+          title: `定義「${schedule.name}」を削除します`,
+          body: message,
+          confirmLabel: "削除する",
+          danger: true,
+        });
+        if (!confirmed) return;
         await api.deleteSchedule(idOf(schedule));
         await loadSchedules();
         notify("削除しました", "", true);
@@ -261,7 +329,13 @@ function button(label, handler) {
 $("#btn-new-schedule").addEventListener("click", () => openEditor(null));
 
 $("#btn-export-schedules").addEventListener("click", async () => {
-  const path = promptText("書き出し先のファイルの経路を入力してください", "schedules.json");
+  let path;
+  try {
+    path = await api.chooseFileToSave("定義の書き出し先", "schedules.json", api.FILE_FILTERS.json);
+  } catch (error) {
+    notifyFailure(error);
+    return;
+  }
   if (!path) return;
   try {
     const count = await api.exportSchedules(path);
@@ -272,11 +346,22 @@ $("#btn-export-schedules").addEventListener("click", async () => {
 });
 
 $("#btn-import-schedules").addEventListener("click", async () => {
-  const path = promptText("取り込むファイルの経路を入力してください", "schedules.json");
+  let path;
+  try {
+    path = await api.chooseFileToOpen("取り込む定義のファイル", api.FILE_FILTERS.json);
+  } catch (error) {
+    notifyFailure(error);
+    return;
+  }
   if (!path) return;
-  const overwrite = confirmAction(
-    "同じ名称の定義がある場合に上書きしますか。\n「キャンセル」を選ぶと取り込みません。",
-  );
+  const overwrite = await confirmAction({
+    title: "同じ名称の定義の扱い",
+    body:
+      "取り込むファイルに、既にある定義と同じ名称の定義が含まれている場合の扱いを選んでください。\n" +
+      "「上書きしない」を選ぶと、同じ名称の定義だけを取り込まず、ほかの定義は取り込みます。",
+    confirmLabel: "上書きする",
+    cancelLabel: "上書きしない",
+  });
   try {
     const outcome = await api.importSchedules(path, overwrite);
     const parts = [`追加 ${outcome.added} 件`, `上書き ${outcome.overwritten} 件`];
@@ -289,6 +374,40 @@ $("#btn-import-schedules").addEventListener("click", async () => {
     notifyFailure(error);
   }
 });
+
+// 定義の編集に、保存していない変更があるか。
+// 入力欄はすべて編集欄の中にあるため、編集欄で入力と変更を受けたら変更ありとする。
+const editorState = { dirty: false };
+for (const type of ["input", "change"]) {
+  $("#schedule-editor").addEventListener(type, () => {
+    editorState.dirty = true;
+  });
+}
+
+/**
+ * 定義の編集を閉じる。保存していない変更があれば、破棄してよいか確かめる。
+ * @returns {Promise<boolean>} 閉じたか (編集していない場合も true)
+ */
+async function closeEditor({ discard = false } = {}) {
+  const host = $("#schedule-editor");
+  if (host.hidden) return true;
+  if (
+    !discard &&
+    editorState.dirty &&
+    !(await confirmAction({
+      title: "保存していない変更があります",
+      body: "定義の編集内容を保存していません。閉じると変更は失われます。",
+      confirmLabel: "変更を破棄して閉じる",
+      cancelLabel: "編集に戻る",
+      danger: true,
+    }))
+  ) {
+    return false;
+  }
+  host.hidden = true;
+  editorState.dirty = false;
+  return true;
+}
 
 // 定義の編集。項目はコア層の検証に任せ、画面は入力の受け渡しに徹する。
 async function openEditor(schedule) {
@@ -316,6 +435,7 @@ async function openEditor(schedule) {
           confidential: false,
           epic: null,
           iteration: null,
+          iteration_by_occurrence: false,
           weight: null,
         },
       };
@@ -377,15 +497,44 @@ async function openEditor(schedule) {
     value: draft.issue.epic ? [draft.issue.epic] : [],
     onChange: (ids) => (draft.issue.epic = ids[0] ?? null),
   });
+  // 固定で選んだ値は、自動へ切り替えて戻したときに復元できるよう別に持つ。
+  let fixedIteration = draft.issue.iteration;
   const iterationPicker = candidatePicker({
-    label: "イテレーション (EE 固有項目)",
+    label: "イテレーション",
     project: draft.project,
     kind: "iteration",
     multiple: false,
     value: draft.issue.iteration ? [draft.issue.iteration] : [],
-    onChange: (ids) => (draft.issue.iteration = ids[0] ?? null),
+    onChange: (ids) => {
+      fixedIteration = ids[0] ?? null;
+      if (!draft.issue.iteration_by_occurrence) draft.issue.iteration = fixedIteration;
+    },
   });
-  pickers.push(labelPicker, assigneePicker, milestonePicker, epicPicker, iterationPicker);
+  const iterationStatus = iterationCandidateStatus(draft.project);
+  pickers.push(
+    labelPicker,
+    assigneePicker,
+    milestonePicker,
+    epicPicker,
+    iterationPicker,
+    iterationStatus,
+  );
+  // 計画 9 (D-28): 繰り返しの各回を、その発生日を含むイテレーションへ入れられるようにする。
+  const iterationRule = selectField(
+    "イテレーションの決め方",
+    { fixed: "固定で選ぶ", occurrence: "発生日を含むイテレーションを自動で選ぶ" },
+    draft.issue.iteration_by_occurrence ? "occurrence" : "fixed",
+    (v) => {
+      draft.issue.iteration_by_occurrence = v === "occurrence";
+      draft.issue.iteration = draft.issue.iteration_by_occurrence ? null : fixedIteration;
+      showIterationRule();
+    },
+  );
+  function showIterationRule() {
+    iterationPicker.hidden = draft.issue.iteration_by_occurrence;
+    iterationStatus.hidden = !draft.issue.iteration_by_occurrence;
+  }
+  showIterationRule();
   form.append(labelPicker, assigneePicker, milestonePicker);
 
   form.append(
@@ -409,7 +558,7 @@ async function openEditor(schedule) {
   const eeBox = el("fieldset");
   eeBox.append(el("legend", {}, [text("EE 固有項目")]));
   if (eeAllowed) {
-    eeBox.append(epicPicker, iterationPicker);
+    eeBox.append(epicPicker, iterationRule, iterationPicker, iterationStatus);
     eeBox.append(
       numberField("ウェイト", draft.issue.weight, (v) => (draft.issue.weight = v)),
     );
@@ -454,7 +603,7 @@ async function openEditor(schedule) {
         draft.id = `s${Date.now().toString(16)}`;
         await api.createSchedule(draft);
       }
-      host.hidden = true;
+      await closeEditor({ discard: true });
       await loadSchedules();
       notify("保存しました", "", true);
     } catch (error) {
@@ -464,13 +613,65 @@ async function openEditor(schedule) {
   save.classList.add("primary");
   actions.append(save);
   actions.append(
-    button("閉じる", () => {
-      host.hidden = true;
-    }),
+    button("閉じる", () => closeEditor()),
   );
   form.append(actions);
   fill(host, [form]);
+  editorState.dirty = false;
+  // 編集中は一覧を隠す (styles.css)。転がした位置を先頭へ戻し、入力欄から始める。
+  $("main").scrollTop = 0;
   nameField.querySelector("input").focus();
+}
+
+/**
+ * 自動で選ぶ場合に出す、取得済みのイテレーション候補の状態 (計画 9)。
+ *
+ * 割り当ては展開時に保持済みの候補から行い、展開の中では取得しない (FR-07)。
+ * そのため、ここで候補の件数・取得日時・直近のイテレーションを見せ、再取得できるようにする。
+ */
+function iterationCandidateStatus(initialProject) {
+  let project = initialProject;
+  const summary = el("span", { class: "hint" });
+  const refetch = el("button", { type: "button" }, [text("再取得")]);
+  const wrap = el("div", { class: "iteration-status" }, [
+    el("p", { class: "hint" }, [
+      text(
+        "展開するとき、各回の発生日を含むイテレーションを入れます。取得済みの候補から選ぶため、新しいイテレーションができたら再取得してください。",
+      ),
+    ]),
+    el("div", { class: "picker-foot" }, [summary, refetch]),
+  ]);
+
+  async function load(refresh) {
+    if (!project) {
+      summary.textContent = "登録先プロジェクトを先に選んでください";
+      refetch.disabled = true;
+      return;
+    }
+    refetch.disabled = false;
+    try {
+      const list = refresh
+        ? await api.refetchCandidates(project, "iteration")
+        : await api.candidates(project, "iteration");
+      const today = new Date().toISOString().slice(0, 10);
+      const dated = list.items.filter((i) => i.start_date && i.due_date);
+      const next = orderCandidates("iteration", dated).find((i) => i.due_date >= today);
+      summary.textContent =
+        dated.length === 0
+          ? `期間を持つイテレーションがありません。${list.description}`
+          : `${dated.length} 件 (${list.description})${next ? `。直近: ${candidateLabel(next)}` : ""}`;
+    } catch (error) {
+      notifyFailure(error);
+      summary.textContent = error.message;
+    }
+  }
+  refetch.addEventListener("click", () => load(true));
+  load(false);
+  wrap.reloadFor = (next) => {
+    project = next;
+    load(false);
+  };
+  return wrap;
 }
 
 function inputField(label, value, onInput) {
@@ -645,6 +846,40 @@ function defaultPattern(kind) {
 
 const grid = new PreviewGrid($("#preview-grid"), updatePreviewActions);
 
+// 展開前は、空の表の代わりに次の操作を案内する。
+grid.placeholder = () => {
+  const box = el("div", { class: "empty-state" }, [
+    el("p", { class: "empty-title" }, [text("期間を選んで「展開する」を押してください")]),
+    el("p", { class: "empty" }, [
+      text("有効な繰り返し定義から登録候補を作り、ここに一覧にします。登録の前に各行を編集できます。"),
+    ]),
+  ]);
+  if (!state.connection?.can_register) {
+    box.append(
+      el("p", { class: "empty-note" }, [
+        text("GitLab-EE に接続していません。展開はできますが、登録には接続が必要です。"),
+      ]),
+      button("接続画面へ", () => showScreen("connection")),
+    );
+  }
+  return [box];
+};
+grid.render();
+
+/** 列の表示切り替えの選択肢を作る。接続によって EE 固有項目の有無が変わるため、そのたびに作り直す。 */
+function renderColumnMenu() {
+  fill(
+    $("#column-menu"),
+    grid.columnOptions().map((option) => {
+      const box = el("input", { type: "checkbox" });
+      box.checked = option.shown;
+      box.addEventListener("change", () => grid.setColumnShown(option.key, box.checked));
+      return el("label", { class: "check" }, [box, text(option.label)]);
+    }),
+  );
+}
+renderColumnMenu();
+
 for (const preset of document.querySelectorAll("[data-preset]")) {
   preset.addEventListener("click", async () => {
     try {
@@ -703,20 +938,69 @@ function updatePreviewActions() {
   $("#preview-count").textContent = `選択 ${selected} 件 / 全 ${grid.entries.length} 件`;
   const canRegister =
     selected > 0 && invalid.length === 0 && !!state.connection?.can_register;
-  $("#btn-register").disabled = !canRegister;
-  $("#btn-register").title = canRegister
+  const reason = canRegister
     ? ""
     : invalid.length > 0
       ? invalid.join(" / ")
       : selected === 0
         ? "登録する行を選んでください"
         : "GitLab-EE に接続してください";
+  $("#btn-register").disabled = !canRegister;
+  $("#btn-register").title = reason;
+  // 押せない理由はボタンの横にも出す。マウスを乗せなくても分かるようにする。
+  $("#register-reason").textContent =
+    invalid.length > 1 ? `登録できない行が ${invalid.length} 件あります。${invalid[0]} ほか` : reason;
+}
+
+/**
+ * 一括登録の確認に出す要約。件数・発生日の範囲・登録先ごとの件数・機密 Issue の件数を並べる。
+ * 登録先や期間の取り違えに、登録する前に気づけるようにする。
+ */
+function registrationSummary(rows) {
+  const dates = rows.map((r) => r.occurrence_date).sort();
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  const byProject = new Map();
+  for (const row of rows) byProject.set(row.project, (byProject.get(row.project) ?? 0) + 1);
+  const confidential = rows.filter((r) => r.confidential).length;
+
+  const list = el("dl", { class: "summary" });
+  const item = (term, ...values) => list.append(el("dt", {}, [text(term)]), el("dd", {}, values));
+  item("件数", text(`${rows.length} 件`));
+  item("発生日", el("span", { class: "mono" }, [text(first === last ? first : `${first} 〜 ${last}`)]));
+  item(
+    "登録先",
+    el(
+      "ul",
+      { class: "summary-list" },
+      [...byProject]
+        .sort((a, b) => b[1] - a[1])
+        .map(([project, count]) =>
+          el("li", {}, [el("span", {}, [text(project)]), el("span", { class: "mono" }, [text(`${count} 件`)])]),
+        ),
+    ),
+  );
+  if (confidential > 0) {
+    item("機密 Issue", el("strong", { class: "attention" }, [text(`${confidential} 件`)]));
+  }
+  return [
+    el("p", {}, [
+      text("GitLab-EE に Issue を作成します。作成した Issue は、このアプリから取り消せません。"),
+    ]),
+    list,
+  ];
 }
 
 $("#btn-register").addEventListener("click", async () => {
   const rows = grid.selectedRows();
   if (rows.length === 0) return;
-  if (!confirmAction(`${rows.length} 件を登録します。よろしいですか。`)) return;
+  const confirmed = await confirmAction({
+    title: `${rows.length} 件を一括登録します`,
+    body: registrationSummary(rows),
+    confirmLabel: `${rows.length} 件を登録する`,
+    cancelLabel: "戻って確認する",
+  });
+  if (!confirmed) return;
   await runRegistration(() => api.registerBatch(rows), rows.length);
 });
 
@@ -734,6 +1018,16 @@ async function runRegistration(action, total) {
   try {
     state.lastBatch = await action();
     renderResults(state.lastBatch);
+    // 成功した行はプレビューから外し、二重に登録できないようにする。
+    // 失敗と未処理の行は残し、直してから登録し直せるようにする。
+    const done = new Set(
+      state.lastBatch.rows
+        .filter((r) => r.status === "succeeded")
+        .map((r) => `${r.schedule_name}|${r.occurrence_date}`),
+    );
+    if (done.size > 0) {
+      grid.removeRegistered((row) => done.has(`${row.schedule_name}|${row.occurrence_date}`));
+    }
   } catch (error) {
     notifyFailure(error);
   } finally {
@@ -755,38 +1049,88 @@ api.listen("registration-progress", (event) => {
   if (label) label.textContent = `${completed} / ${total}`;
 });
 
+const STATUS_LABELS = { failed: "失敗", not_attempted: "未処理", succeeded: "成功" };
+// 対処が要る行ほど上に置く (NFR-16)。
+const STATUS_ORDER = { failed: 0, not_attempted: 1, succeeded: 2 };
+
 function renderResults(batch) {
   const host = $("#result-panel");
   host.hidden = false;
   const parts = [];
-  parts.push(
-    el("p", {}, [
-      text(
-        `成功 ${batch.succeeded} 件 / 失敗 ${batch.failed} 件 / 未処理 ${batch.not_attempted} 件`,
-      ),
-    ]),
+
+  const counts = el(
+    "div",
+    { class: "result-counts" },
+    [
+      ["failed", batch.failed],
+      ["not_attempted", batch.not_attempted],
+      ["succeeded", batch.succeeded],
+    ].map(([status, count]) =>
+      el("span", { class: `count-chip count-${status}${count === 0 ? " zero" : ""}` }, [
+        el("strong", {}, [text(String(count))]),
+        text(` 件${STATUS_LABELS[status]}`),
+      ]),
+    ),
   );
-  if (batch.cancelled) parts.push(el("p", {}, [text("利用者の操作で中止しました。")]));
-  if (batch.aborted) parts.push(el("p", {}, [text(batch.aborted)]));
+  const head = el("div", { class: "result-head" }, [counts]);
+  const tools = el("div", { class: "toolbar" });
+  const problems = batch.failed + batch.not_attempted;
 
   const table = el("table", { class: "list" });
+  if (problems > 0 && batch.succeeded > 0) {
+    const onlyProblems = el("input", { type: "checkbox" });
+    onlyProblems.addEventListener("change", () => {
+      table.classList.toggle("only-problems", onlyProblems.checked);
+    });
+    tools.append(el("label", { class: "check" }, [onlyProblems, text("失敗と未処理だけを表示する")]));
+  }
+  if (batch.can_retry) {
+    const retry = button("失敗した行のみ再実行する", async () => {
+      const failed = new Set(
+        batch.rows
+          .filter((r) => r.status === "failed")
+          .map((r) => `${r.schedule_name}|${r.occurrence_date}`),
+      );
+      const confirmed = await confirmAction({
+        title: `失敗した ${failed.size} 件を再実行します`,
+        body: "失敗した行だけを、プレビューの内容のまま GitLab-EE に登録し直します。成功した行は登録しません。",
+        confirmLabel: `${failed.size} 件を再実行する`,
+        cancelLabel: "やめる",
+      });
+      if (!confirmed) return;
+      grid.keepOnly((row) => failed.has(`${row.schedule_name}|${row.occurrence_date}`));
+      const rows = grid.selectedRows();
+      await runRegistration(() => api.retryFailed(rows), rows.length);
+    });
+    retry.classList.add("primary");
+    tools.append(retry);
+  }
+  head.append(tools);
+  parts.push(head);
+  if (batch.cancelled) parts.push(el("p", { class: "result-note" }, [text("利用者の操作で中止しました。")]));
+  if (batch.aborted) parts.push(el("p", { class: "result-note" }, [text(batch.aborted)]));
+
   table.append(
     el("thead", {}, [rowOf("th", ["結果", "定義名", "発生日", "登録先", "Issue", "備考"])]),
   );
   const body = el("tbody");
-  for (const row of batch.rows) {
-    const tr = el("tr");
+  const rows = [...batch.rows].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
+  for (const row of rows) {
+    const tr = el("tr", { class: `result-${row.status}` });
     tr.append(
       el("td", { class: `status-${row.status}` }, [
-        text({ succeeded: "成功", failed: "失敗", not_attempted: "未処理" }[row.status]),
+        text(STATUS_LABELS[row.status]),
       ]),
     );
     tr.append(el("td", {}, [text(row.schedule_name)]));
     tr.append(el("td", {}, [text(row.occurrence_date)]));
     tr.append(el("td", {}, [text(row.project)]));
-    const issue = el("td");
+    const issue = el("td", { class: "issue-cell" });
     if (row.issue_reference) {
-      issue.append(text(row.issue_reference));
+      issue.append(
+        el("span", { class: "mono" }, [text(row.issue_reference)]),
+        openIssueButton(row.project, row.issue_reference),
+      );
       if (row.web_url) {
         issue.append(el("span", { class: "cellnote" }, [text(row.web_url)]));
       }
@@ -803,21 +1147,6 @@ function renderResults(batch) {
   }
   table.append(body);
   parts.push(table);
-
-  if (batch.can_retry) {
-    const retry = button("失敗した行のみ再実行する", async () => {
-      const failed = new Set(
-        batch.rows
-          .filter((r) => r.status === "failed")
-          .map((r) => `${r.schedule_name}|${r.occurrence_date}`),
-      );
-      grid.keepOnly((row) => failed.has(`${row.schedule_name}|${row.occurrence_date}`));
-      const rows = grid.selectedRows();
-      await runRegistration(() => api.retryFailed(rows), rows.length);
-    });
-    retry.classList.add("primary");
-    parts.push(el("div", { class: "actions" }, [retry]));
-  }
   fill(host, parts);
 }
 
@@ -884,7 +1213,27 @@ async function renderSingleForm() {
     value: [],
     onChange: (ids) => (draft.milestone = ids[0] ?? null),
   });
-  pickers.push(labelPicker, assigneePicker, milestonePicker);
+  const epicPicker = candidatePicker({
+    label: "エピック (EE 固有項目)",
+    project: "",
+    kind: "epic",
+    multiple: false,
+    value: [],
+    onChange: (ids) => {
+      const parsed = Number.parseInt(ids[0] ?? "", 10);
+      draft.epic_id = Number.isNaN(parsed) ? null : parsed;
+    },
+  });
+  const iterationPicker = candidatePicker({
+    label: "イテレーション (EE 固有項目)",
+    project: "",
+    kind: "iteration",
+    multiple: false,
+    value: [],
+    // 識別子のまま渡す。GraphQL が受け取る形への変換はコマンド境界で行う (ADR-05)。
+    onChange: (ids) => (draft.iteration_id = ids[0] ?? null),
+  });
+  pickers.push(labelPicker, assigneePicker, milestonePicker, epicPicker, iterationPicker);
 
   const parts = [
     projectField,
@@ -897,6 +1246,15 @@ async function renderSingleForm() {
     dateField("期限", draft.due_date, (v) => (draft.due_date = v)),
     checkField("機密 Issue にする", draft.confidential, (v) => (draft.confidential = v)),
   ];
+  // FR-12: 入力できる項目は FR-06 と同一にする。
+  // EC-15: ライセンスティアが許さない場合は EE 固有項目を出さない。
+  if (state.connection ? state.connection.allows_ee_fields : true) {
+    const eeBox = el("fieldset");
+    eeBox.append(el("legend", {}, [text("EE 固有項目")]));
+    eeBox.append(epicPicker, iterationPicker);
+    eeBox.append(numberField("ウェイト", draft.weight, (v) => (draft.weight = v)));
+    parts.push(eeBox);
+  }
   const register = button("登録する", async () => {
     try {
       const row = await api.registerSingle(draft);
@@ -929,7 +1287,15 @@ async function loadMaster() {
         const del = button("削除", async () => {
           try {
             const message = await api.projectDeleteConfirmation(project.id);
-            if (message && !confirmAction(message)) return;
+            const confirmed =
+              !message ||
+              (await confirmAction({
+                title: `登録先「${project.display_name}」を削除します`,
+                body: message,
+                confirmLabel: "削除する",
+                danger: true,
+              }));
+            if (!confirmed) return;
             await api.deleteProject(project.id);
             await loadMaster();
           } catch (error) {
@@ -1016,10 +1382,16 @@ $("#btn-add-holiday").addEventListener("click", async () => {
 });
 
 $("#btn-import-holidays").addEventListener("click", async () => {
-  const path = promptText(
-    "取り込むファイルの経路を入力してください (1 行 1 件、YYYY-MM-DD,名称)",
-    "holidays.txt",
-  );
+  let path;
+  try {
+    path = await api.chooseFileToOpen(
+      "取り込む休日のファイル (1 行 1 件、YYYY-MM-DD,名称)",
+      api.FILE_FILTERS.text,
+    );
+  } catch (error) {
+    notifyFailure(error);
+    return;
+  }
   if (!path) return;
   try {
     const outcome = await api.importHolidays(path);
@@ -1038,7 +1410,13 @@ $("#btn-import-holidays").addEventListener("click", async () => {
 });
 
 $("#btn-export-holidays").addEventListener("click", async () => {
-  const path = promptText("書き出し先のファイルの経路を入力してください", "holidays.txt");
+  let path;
+  try {
+    path = await api.chooseFileToSave("休日の書き出し先", "holidays.txt", api.FILE_FILTERS.text);
+  } catch (error) {
+    notifyFailure(error);
+    return;
+  }
   if (!path) return;
   try {
     const count = await api.exportHolidays(path);
@@ -1069,7 +1447,7 @@ async function searchHistory() {
     const table = el("table", { class: "list" });
     table.append(
       el("thead", {}, [
-        rowOf("th", ["選択", "登録日時", "定義名", "発生日", "登録先", "Issue"]),
+        rowOf("th", ["選択", "登録日時", "定義名", "発生日", "登録先", "Issue", "操作"]),
       ]),
     );
     const body = el("tbody");
@@ -1082,11 +1460,16 @@ async function searchHistory() {
         else historySelection.delete(key);
       });
       tr.append(el("td", {}, [box]));
-      tr.append(el("td", {}, [text(String(entry.registered_at).replace("T", " "))]));
+      tr.append(
+        el("td", { class: "mono" }, [text(String(entry.registered_at).replace("T", " "))]),
+      );
       tr.append(el("td", {}, [text(entry.schedule_name)]));
-      tr.append(el("td", {}, [text(entry.occurrence_date)]));
+      tr.append(el("td", { class: "mono" }, [text(entry.occurrence_date)]));
       tr.append(el("td", {}, [text(entry.project)]));
-      tr.append(el("td", {}, [text(entry.issue_reference)]));
+      tr.append(el("td", { class: "mono" }, [text(entry.issue_reference)]));
+      tr.append(
+        el("td", { class: "row-actions" }, [openIssueButton(entry.project, entry.issue_reference)]),
+      );
       body.append(tr);
     }
     table.append(body);
@@ -1094,6 +1477,19 @@ async function searchHistory() {
   } catch (error) {
     notifyFailure(error);
   }
+}
+
+/** 作成された Issue を既定のブラウザで開くボタン (FR-19)。URL は境界側で組み立てる。 */
+function openIssueButton(project, issueReference) {
+  const node = button("開く", async () => {
+    try {
+      await api.openIssue(project, issueReference);
+    } catch (error) {
+      notifyFailure(error);
+    }
+  });
+  node.setAttribute("aria-label", `${project} ${issueReference} をブラウザで開く`);
+  return node;
 }
 
 $("#btn-search-history").addEventListener("click", () => searchHistory());
@@ -1109,7 +1505,13 @@ $("#btn-delete-history").addEventListener("click", async () => {
   });
   try {
     const message = await api.historyDeleteConfirmation(keys);
-    if (!confirmAction(message)) return;
+    const confirmed = await confirmAction({
+      title: `登録履歴 ${keys.length} 件を削除します`,
+      body: message,
+      confirmLabel: "削除する",
+      danger: true,
+    });
+    if (!confirmed) return;
     const removed = await api.deleteHistory(keys);
     notify(`${removed} 件を削除しました`, "", true);
     await searchHistory();
