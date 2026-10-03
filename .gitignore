@@ -1,2 +1,5 @@
 # Rust のビルド成果物
 /target/
+
+# Tauri が生成する定義ファイル
+/crates/desktop/gen/

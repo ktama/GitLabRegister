@@ -16,6 +16,8 @@ pub const HOLIDAYS_FILE: &str = "holidays.json";
 pub const HISTORY_FILE: &str = "history.jsonl";
 pub const CANDIDATES_FILE: &str = "candidates.json";
 pub const LOGS_DIR: &str = "logs";
+/// WebView2 がブラウザのデータを置くフォルダ (NFR-05、NFR-09、設計書 8.3)。
+pub const WEBVIEW_DATA_DIR: &str = "webview";
 /// 一括登録の実行中を示す印 (EC-08、設計書 7.2)。
 pub const IN_PROGRESS_FILE: &str = "registration-in-progress.json";
 
@@ -93,6 +95,14 @@ impl AppPaths {
         self.root.join(LOGS_DIR)
     }
 
+    /// WebView2 のユーザーデータフォルダ。
+    ///
+    /// 設定フォルダ配下に固定することで、ブラウザのデータが
+    /// 利用者プロファイルの外や実行ファイルの隣へ出ることを防ぐ (NFR-09)。
+    pub fn webview_data_dir(&self) -> PathBuf {
+        self.root.join(WEBVIEW_DATA_DIR)
+    }
+
     pub fn in_progress(&self) -> PathBuf {
         self.root.join(IN_PROGRESS_FILE)
     }
@@ -132,6 +142,7 @@ mod tests {
             paths.history(),
             paths.candidates(),
             paths.logs_dir(),
+            paths.webview_data_dir(),
             paths.in_progress(),
         ] {
             assert!(
@@ -159,6 +170,15 @@ mod tests {
         assert!(paths.logs_dir().is_dir());
         // 二度目も失敗しない。
         paths.ensure_created().expect("既存でも成功する");
+    }
+
+    /// NFR-05 / NFR-09: WebView2 のデータフォルダが設定フォルダ配下にある。
+    #[test]
+    fn paths_webview_data_is_under_root() {
+        let paths = AppPaths::with_root(r"C:\dummy\GitLabRegister");
+        let webview = paths.webview_data_dir();
+        assert!(webview.starts_with(paths.root()), "{webview:?}");
+        assert!(webview.ends_with(WEBVIEW_DATA_DIR));
     }
 
     #[test]

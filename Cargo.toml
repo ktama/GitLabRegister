@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/infra", "crates/app"]
+members = ["crates/core", "crates/infra", "crates/app", "crates/desktop"]
 resolver = "2"
 
 [workspace.package]
@@ -16,3 +16,6 @@ reqwest = { version = "0.13", features = ["json", "query"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros"] }
 gitlabregister-core = { path = "crates/core" }
 gitlabregister-infra = { path = "crates/infra" }
+gitlabregister-app = { path = "crates/app" }
+tauri = { version = "2.12", features = [] }
+tauri-build = { version = "2", features = [] }

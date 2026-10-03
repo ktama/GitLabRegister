@@ -1,0 +1,203 @@
+/* 表示スケール 100〜200% で文字とボタンが欠けないようにする (NFR-18)。
+   寸法はすべて rem と % で指定し、固定の px を使わない。
+   WebView は OS の表示スケールを根の font-size へ反映するため、rem で書けば追従する。 */
+
+:root {
+  --fg: #16181d;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --muted: #5b6069;
+  --line: #d3d7de;
+  --accent: #1f5fd0;
+  --accent-fg: #ffffff;
+  --warn-bg: #fff6e0;
+  --warn-fg: #7a4e00;
+  --error-bg: #fdecea;
+  --error-fg: #a01b10;
+  --ok-bg: #e8f5ec;
+  --ok-fg: #0d6b32;
+  --focus: #0b67d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e8ec;
+    --bg: #15171c;
+    --panel: #1d2026;
+    --muted: #a0a6b0;
+    --line: #353a44;
+    --accent: #4a8df0;
+    --accent-fg: #0b1220;
+    --warn-bg: #3a2e12;
+    --warn-fg: #f0cf8a;
+    --error-bg: #3c1d1a;
+    --error-fg: #f3b0a8;
+    --ok-bg: #16331f;
+    --ok-fg: #9bdcae;
+    --focus: #7fb4ff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* キーボードだけで操作できるよう、焦点を必ず見えるようにする (NFR-15)。 */
+:focus-visible {
+  outline: 0.15rem solid var(--focus);
+  outline-offset: 0.1rem;
+}
+
+.bar {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 0.0625rem solid var(--line);
+  flex-wrap: wrap;
+}
+.bar h1 { font-size: 1.1rem; margin: 0; }
+.conn { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.4rem 1rem 0;
+  border-bottom: 0.0625rem solid var(--line);
+  flex-wrap: wrap;
+}
+.tabs button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 0.0625rem solid var(--line);
+  border-bottom: none;
+  border-radius: 0.3rem 0.3rem 0 0;
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+}
+.tabs button[aria-selected="true"] {
+  background: var(--bg);
+  font-weight: 700;
+  border-bottom: 0.0625rem solid var(--bg);
+  margin-bottom: -0.0625rem;
+}
+
+main { padding: 1rem; }
+.screen h2 { font-size: 1rem; margin: 1.2rem 0 0.5rem; }
+.screen h2:first-child { margin-top: 0; }
+.hint { color: var(--muted); font-size: 0.9rem; margin: 0.2rem 0 0.8rem; }
+
+.form { display: flex; flex-direction: column; gap: 0.6rem; max-width: 46rem; }
+.form.inline { flex-direction: row; flex-wrap: wrap; align-items: flex-end; max-width: none; }
+.form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; }
+.form label.check { flex-direction: row; align-items: center; gap: 0.4rem; }
+.form fieldset {
+  border: 0.0625rem solid var(--line);
+  border-radius: 0.3rem;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.form legend { font-size: 0.9rem; padding: 0 0.3rem; }
+
+input, select, textarea, button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 0.0625rem solid var(--line);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  min-height: 2rem;
+}
+textarea { min-height: 4rem; resize: vertical; }
+button { cursor: pointer; background: var(--panel); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button.danger { color: var(--error-fg); border-color: var(--error-fg); }
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.8rem 0;
+}
+.count { color: var(--muted); font-size: 0.9rem; }
+
+.panel {
+  border: 0.0625rem solid var(--line);
+  border-radius: 0.3rem;
+  background: var(--panel);
+  padding: 0.7rem 0.9rem;
+  margin: 0.6rem 0;
+}
+.panel:empty { display: none; }
+.panel ul { margin: 0.2rem 0; padding-left: 1.2rem; }
+
+.warnings li { color: var(--warn-fg); }
+.warnings { background: var(--warn-bg); border-color: var(--warn-fg); }
+
+.toast {
+  position: fixed;
+  inset-inline: 1rem;
+  top: 1rem;
+  z-index: 10;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.3rem;
+  border: 0.0625rem solid var(--error-fg);
+  background: var(--error-bg);
+  color: var(--error-fg);
+  box-shadow: 0 0.2rem 0.6rem rgb(0 0 0 / 0.2);
+}
+.toast.ok { border-color: var(--ok-fg); background: var(--ok-bg); color: var(--ok-fg); }
+.toast .next { display: block; font-size: 0.9rem; opacity: 0.9; margin-top: 0.2rem; }
+
+.progress { margin: 0.5rem 0; font-size: 0.9rem; }
+.progress progress { width: 100%; height: 1rem; }
+
+/* プレビューの表 (FR-07、FR-08)。最大 500 行 × 10 列をそのまま出す。
+   列幅は内容に合わせ、横に溢れる場合は表だけが横に転がる。 */
+.grid-wrap { overflow: auto; max-height: 60vh; border: 0.0625rem solid var(--line); border-radius: 0.3rem; }
+table.grid { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+table.grid th, table.grid td {
+  border-bottom: 0.0625rem solid var(--line);
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+table.grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+table.grid tbody tr.excluded { color: var(--muted); background: var(--panel); }
+table.grid tbody tr.invalid { background: var(--error-bg); }
+table.grid td input[type="text"] { min-width: 14rem; }
+table.grid td input[type="date"] { min-width: 8.5rem; }
+table.grid td input[type="number"] { width: 5rem; }
+table.grid td .cellnote { display: block; color: var(--warn-fg); font-size: 0.8rem; white-space: normal; max-width: 20rem; }
+
+table.list { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+table.list th, table.list td {
+  border-bottom: 0.0625rem solid var(--line);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+}
+table.list .row-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.status-succeeded { color: var(--ok-fg); font-weight: 700; }
+.status-failed { color: var(--error-fg); font-weight: 700; }
+.status-not_attempted { color: var(--warn-fg); }
+
+.empty { color: var(--muted); }

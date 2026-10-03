@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitLabRegister</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<noscript>この画面は JavaScript が必要です。</noscript>
+
+<header class="bar">
+  <h1>GitLabRegister</h1>
+  <p id="conn-summary" class="conn" role="status">未接続</p>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="画面の切り替え">
+  <button role="tab" aria-selected="true"  data-screen="connection">接続</button>
+  <button role="tab" aria-selected="false" data-screen="schedules">繰り返し定義</button>
+  <button role="tab" aria-selected="false" data-screen="preview">展開と登録</button>
+  <button role="tab" aria-selected="false" data-screen="single">単発登録</button>
+  <button role="tab" aria-selected="false" data-screen="master">登録先と休日</button>
+  <button role="tab" aria-selected="false" data-screen="history">登録履歴</button>
+</nav>
+
+<div id="toast" class="toast" role="alert" aria-live="assertive" hidden></div>
+
+<main>
+  <!-- 接続 (FR-01、NFR-17) -->
+  <section id="screen-connection" class="screen" role="tabpanel" aria-label="接続">
+    <h2>GitLab-EE への接続</h2>
+    <p class="hint">パーソナルアクセストークンは端末に保存しません。起動のたびに入力が必要です。</p>
+    <div class="form">
+      <label>接続先 URL
+        <input id="gitlab-url" type="url" placeholder="https://gitlab.example.com" autocomplete="off" />
+      </label>
+      <!-- NFR-05: 伏せ字の入力欄にし、自動入力と綴り確認を切る。
+           これにより入力した値が WebView2 のブラウザデータとして保存される経路を断つ。
+           値は接続のたびにコマンド境界へ渡し、直後に欄を空にする (app.js)。 -->
+      <label>パーソナルアクセストークン
+        <input id="token" type="password" autocomplete="off" spellcheck="false" />
+      </label>
+      <fieldset>
+        <legend>プロキシ</legend>
+        <label>使い方
+          <select id="proxy-mode">
+            <option value="FollowSystem">OS の設定に従う</option>
+            <option value="Manual">指定する</option>
+            <option value="Direct">経由しない</option>
+          </select>
+        </label>
+        <div id="proxy-manual" hidden>
+          <label>ホスト <input id="proxy-host" type="text" autocomplete="off" /></label>
+          <label>ポート <input id="proxy-port" type="number" min="1" max="65535" /></label>
+          <label class="check"><input id="proxy-auth" type="checkbox" /> 利用者名とパスワードを要求する</label>
+          <div id="proxy-creds" hidden>
+            <label>利用者名 <input id="proxy-user" type="text" autocomplete="off" /></label>
+            <label>パスワード <input id="proxy-password" type="password" autocomplete="off" /></label>
+          </div>
+        </div>
+      </fieldset>
+      <div class="actions">
+        <button id="btn-connect" class="primary" accesskey="c">接続する (Alt+C)</button>
+        <button id="btn-disconnect">切断する</button>
+      </div>
+    </div>
+    <div id="conn-detail" class="panel"></div>
+  </section>
+
+  <!-- 繰り返し定義 (FR-03〜FR-06、FR-14、FR-21) -->
+  <section id="screen-schedules" class="screen" role="tabpanel" aria-label="繰り返し定義" hidden>
+    <h2>繰り返しタスク定義</h2>
+    <div class="actions">
+      <button id="btn-new-schedule" class="primary" accesskey="n">新規作成 (Alt+N)</button>
+      <button id="btn-export-schedules">書き出し</button>
+      <button id="btn-import-schedules">取り込み</button>
+    </div>
+    <div id="schedule-list" class="panel"></div>
+    <div id="schedule-editor" class="panel" hidden></div>
+  </section>
+
+  <!-- 展開と登録 (FR-07〜FR-10、FR-20) -->
+  <section id="screen-preview" class="screen" role="tabpanel" aria-label="展開と登録" hidden>
+    <h2>期間を指定して展開</h2>
+    <div class="form inline">
+      <label>開始日 <input id="range-start" type="date" /></label>
+      <label>終了日 <input id="range-end" type="date" /></label>
+      <span class="presets">
+        <button data-preset="this_week">今週</button>
+        <button data-preset="this_month">今月</button>
+        <button data-preset="next_month">翌月</button>
+        <button data-preset="this_quarter">今四半期</button>
+      </span>
+      <button id="btn-expand" class="primary" accesskey="e">展開する (Alt+E)</button>
+    </div>
+    <div id="preview-warnings" class="panel warnings"></div>
+    <div class="actions">
+      <button id="btn-select-all">全選択</button>
+      <button id="btn-select-none">全解除</button>
+      <label class="check"><input id="show-excluded" type="checkbox" /> 除外された発生日も表示する</label>
+      <span id="preview-count" class="count"></span>
+      <button id="btn-register" class="primary" accesskey="r">一括登録する (Alt+R)</button>
+      <button id="btn-cancel-register" accesskey="x" hidden>中止する (Alt+X)</button>
+    </div>
+    <div id="progress" class="progress" hidden></div>
+    <div id="preview-grid" class="grid-wrap"></div>
+    <div id="result-panel" class="panel" hidden></div>
+  </section>
+
+  <!-- 単発登録 (FR-12) -->
+  <section id="screen-single" class="screen" role="tabpanel" aria-label="単発登録" hidden>
+    <h2>単発の Issue 登録</h2>
+    <p class="hint">繰り返し定義を使わず 1 件登録します。登録履歴には記録されません。</p>
+    <div id="single-form" class="form"></div>
+  </section>
+
+  <!-- 登録先と休日 (FR-02、FR-13、FR-22) -->
+  <section id="screen-master" class="screen" role="tabpanel" aria-label="登録先と休日" hidden>
+    <h2>登録先プロジェクト</h2>
+    <div class="form inline">
+      <label>経路または識別子 <input id="project-path" type="text" placeholder="group/alpha" autocomplete="off" /></label>
+      <button id="btn-add-project" class="primary">追加する</button>
+    </div>
+    <div id="project-list" class="panel"></div>
+    <h2>休日カレンダー</h2>
+    <div class="form inline">
+      <label>日付 <input id="holiday-date" type="date" /></label>
+      <label>名称 <input id="holiday-name" type="text" autocomplete="off" /></label>
+      <button id="btn-add-holiday" class="primary">追加する</button>
+      <button id="btn-import-holidays">取り込み</button>
+      <button id="btn-export-holidays">書き出し</button>
+    </div>
+    <div id="holiday-list" class="panel"></div>
+  </section>
+
+  <!-- 登録履歴 (FR-19、FR-23) -->
+  <section id="screen-history" class="screen" role="tabpanel" aria-label="登録履歴" hidden>
+    <h2>登録履歴</h2>
+    <div class="form inline">
+      <label>定義名 <input id="hist-name" type="text" autocomplete="off" /></label>
+      <label>発生日 <input id="hist-from" type="date" /></label>
+      <label>〜 <input id="hist-to" type="date" /></label>
+      <label>プロジェクト <input id="hist-project" type="text" autocomplete="off" /></label>
+      <button id="btn-search-history" class="primary">絞り込む</button>
+      <button id="btn-delete-history">選択した履歴を削除</button>
+    </div>
+    <div id="history-list" class="panel"></div>
+  </section>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
