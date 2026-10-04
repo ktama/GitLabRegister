@@ -39,11 +39,7 @@ impl BusinessDayCalendar {
     /// 調整方法に従って発生日を移動する。
     ///
     /// 戻り値が `None` のとき、その回は発生しない (`SkipOccurrence`、または探索上限超過)。
-    pub fn adjust(
-        &self,
-        date: NaiveDate,
-        adjustment: BusinessDayAdjustment,
-    ) -> Option<NaiveDate> {
+    pub fn adjust(&self, date: NaiveDate, adjustment: BusinessDayAdjustment) -> Option<NaiveDate> {
         match adjustment {
             BusinessDayAdjustment::None => Some(date),
             BusinessDayAdjustment::SkipOccurrence => {

@@ -31,7 +31,10 @@ pub fn resolve_preset(preset: RangePreset, today: NaiveDate) -> DateRange {
             let monday = today - Days::new(u64::from(today.weekday().num_days_from_monday()));
             (monday, monday + Days::new(6))
         }
-        RangePreset::ThisMonth => (first_day(today.year(), today.month()), last_day(today.year(), today.month())),
+        RangePreset::ThisMonth => (
+            first_day(today.year(), today.month()),
+            last_day(today.year(), today.month()),
+        ),
         RangePreset::NextMonth => {
             let (y, m) = next_month(today.year(), today.month());
             (first_day(y, m), last_day(y, m))
@@ -100,12 +103,8 @@ pub fn expand(
     let mut result = ExpansionResult::default();
 
     for schedule in schedules.iter().filter(|s| s.enabled) {
-        let raw = recurrence::occurrences(
-            &schedule.pattern,
-            &schedule.active_period,
-            range,
-            &calendar,
-        );
+        let raw =
+            recurrence::occurrences(&schedule.pattern, &schedule.active_period, range, &calendar);
 
         // 営業日調整を適用する。調整の結果同じ日付に重なった場合は 1 件に束ねる (FR-05)。
         let mut adjusted: Vec<(NaiveDate, NaiveDate)> = Vec::new();
@@ -158,7 +157,10 @@ pub fn expand(
 
     result.candidates.sort_by_key(|c| c.occurrence.date);
     result.warnings.extend(holiday_warnings(
-        schedules, &calendar, range, &result.candidates,
+        schedules,
+        &calendar,
+        range,
+        &result.candidates,
     ));
     if result.candidates.len() > MAX_CANDIDATES {
         result.warnings.push(ExpansionWarning::TooManyCandidates {
@@ -373,12 +375,7 @@ mod tests {
         let s = schedule("A", monthly_first(), BusinessDayAdjustment::None);
         let mut history = HistoryIndex::default();
         history.record(&ScheduleId("A".into()), d(2026, 10, 1));
-        let got = expand(
-            &[s],
-            &[],
-            &history,
-            &range((2026, 10, 1), (2026, 11, 30)),
-        );
+        let got = expand(&[s], &[], &history, &range((2026, 10, 1), (2026, 11, 30)));
         assert_eq!(
             got.candidates
                 .iter()
@@ -386,10 +383,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![d(2026, 11, 1)]
         );
-        assert_eq!(
-            got.excluded,
-            vec![(ScheduleId("A".into()), d(2026, 10, 1))]
-        );
+        assert_eq!(got.excluded, vec![(ScheduleId("A".into()), d(2026, 10, 1))]);
     }
 
     /// FR-05: 営業日調整で期間外に出た発生日も候補として残る。調整前の日付を併せて保持する。
@@ -414,21 +408,17 @@ mod tests {
     /// EC-23: 営業日調整を使う定義があり、休日未登録の年が含まれると警告する。
     #[test]
     fn expand_warns_year_without_holidays() {
-        let s = schedule(
-            "A",
-            monthly_first(),
-            BusinessDayAdjustment::NextBusinessDay,
-        );
+        let s = schedule("A", monthly_first(), BusinessDayAdjustment::NextBusinessDay);
         let got = expand(
             &[s],
             &[],
             &HistoryIndex::default(),
             &range((2026, 10, 1), (2026, 10, 31)),
         );
-        assert!(got.warnings.iter().any(|w| matches!(
-            w,
-            ExpansionWarning::YearWithoutHolidays { year: 2026, .. }
-        )));
+        assert!(got
+            .warnings
+            .iter()
+            .any(|w| matches!(w, ExpansionWarning::YearWithoutHolidays { year: 2026, .. })));
     }
 
     /// EC-23: 営業日調整を使わない定義だけなら休日の警告は出ない。

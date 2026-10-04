@@ -145,7 +145,9 @@ pub struct CreatedIssue {
 }
 
 /// 候補値の種別 (FR-16)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum CandidateKind {
     Label,
     Member,
@@ -255,10 +257,7 @@ impl<T: HttpTransport> GitLabClient<T> {
             iid: u64,
             web_url: String,
         }
-        let path = format!(
-            "/api/v4/projects/{}/issues",
-            urlencode(&issue.project_id)
-        );
+        let path = format!("/api/v4/projects/{}/issues", urlencode(&issue.project_id));
         let created: Created = self
             .send_json(HttpRequest::post(path, issue_body(issue)), "Issue の作成")
             .await?;
@@ -291,7 +290,10 @@ impl<T: HttpTransport> GitLabClient<T> {
             }
         });
         let response = self
-            .send(HttpRequest::post("/api/graphql", body), "イテレーション設定")
+            .send(
+                HttpRequest::post("/api/graphql", body),
+                "イテレーション設定",
+            )
             .await?;
 
         // GraphQL は状態コード 200 でも本文にエラーを入れる。
@@ -400,10 +402,9 @@ impl<T: HttpTransport> GitLabClient<T> {
         if project.namespace.kind != "group" {
             return Ok(Vec::new());
         }
-        let request =
-            HttpRequest::get(format!("/api/v4/groups/{}/epics", project.namespace.id))
-                .with_query("include_ancestor_groups", "true")
-                .with_query("per_page", "100");
+        let request = HttpRequest::get(format!("/api/v4/groups/{}/epics", project.namespace.id))
+            .with_query("include_ancestor_groups", "true")
+            .with_query("per_page", "100");
         let items: Vec<serde_json::Value> = self.send_json(request, "候補の取得").await?;
         Ok(items
             .iter()
@@ -494,7 +495,9 @@ fn classify_graphql_errors(errors: &[serde_json::Value]) -> ErrorKind {
         .to_ascii_lowercase();
     if text.contains("unauthorized") || text.contains("authentication") {
         ErrorKind::Authentication
-    } else if text.contains("not allowed") || text.contains("forbidden") || text.contains("permission")
+    } else if text.contains("not allowed")
+        || text.contains("forbidden")
+        || text.contains("permission")
     {
         ErrorKind::Authorization
     } else if text.contains("not found") || text.contains("does not exist") {
@@ -613,11 +616,14 @@ fn urlencode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::FakeTransport;
     use crate::gitlab::transport::HttpResponse;
+    use crate::testing::FakeTransport;
 
     fn client(responses: Vec<Result<HttpResponse, TransportError>>) -> GitLabClient<FakeTransport> {
-        GitLabClient::with_retry(FakeTransport::new(responses), RetryPolicy::without_waiting())
+        GitLabClient::with_retry(
+            FakeTransport::new(responses),
+            RetryPolicy::without_waiting(),
+        )
     }
 
     fn ok(body: &str) -> Result<HttpResponse, TransportError> {
@@ -731,10 +737,7 @@ mod tests {
             status(500, "{}"),
             status(500, "{}"),
         ]);
-        let err = c
-            .fetch_project("11")
-            .await
-            .expect_err("3 回とも失敗する");
+        let err = c.fetch_project("11").await.expect_err("3 回とも失敗する");
         assert_eq!(err.kind, ErrorKind::Transient);
         assert_eq!(c.transport.sent_count(), 3, "最初の 1 回と再試行 2 回");
     }
@@ -950,9 +953,7 @@ mod tests {
     /// ADR-05: 作成とは別の操作でイテレーションを設定する。
     #[tokio::test]
     async fn iteration_set_sends_mutation() {
-        let c = client(vec![ok(
-            r#"{"data":{"issueSetIteration":{"errors":[]}}}"#,
-        )]);
+        let c = client(vec![ok(r#"{"data":{"issueSetIteration":{"errors":[]}}}"#)]);
         c.set_iteration(1001, "gid://gitlab/Iteration/55")
             .await
             .expect("設定できる");
@@ -964,10 +965,7 @@ mod tests {
             .expect("文字列")
             .contains("issueSetIteration"));
         assert_eq!(body["variables"]["issue"], "gid://gitlab/Issue/1001");
-        assert_eq!(
-            body["variables"]["iteration"],
-            "gid://gitlab/Iteration/55"
-        );
+        assert_eq!(body["variables"]["iteration"], "gid://gitlab/Iteration/55");
     }
 
     /// R-3: 状態コード 200 でも本文のエラーを拾い、分類へ落とす。
@@ -989,7 +987,10 @@ mod tests {
     async fn iteration_set_top_level_errors_are_classified() {
         for (message, expected) in [
             ("Unauthorized access", ErrorKind::Authentication),
-            ("The resource that you are attempting to access does not exist", ErrorKind::NotFound),
+            (
+                "The resource that you are attempting to access does not exist",
+                ErrorKind::NotFound,
+            ),
             ("You do not have permission", ErrorKind::Authorization),
             ("Variable $iteration is invalid", ErrorKind::Validation),
         ] {
@@ -1039,8 +1040,16 @@ mod tests {
     #[tokio::test]
     async fn candidate_fetch_maps_name_per_kind() {
         let cases = [
-            (CandidateKind::Label, r#"[{"id":1,"name":"report"}]"#, "report"),
-            (CandidateKind::Member, r#"[{"id":7,"username":"taro"}]"#, "taro"),
+            (
+                CandidateKind::Label,
+                r#"[{"id":1,"name":"report"}]"#,
+                "report",
+            ),
+            (
+                CandidateKind::Member,
+                r#"[{"id":7,"username":"taro"}]"#,
+                "taro",
+            ),
             (
                 CandidateKind::Milestone,
                 r#"[{"id":3,"title":"2026Q4"}]"#,
@@ -1064,7 +1073,9 @@ mod tests {
     #[tokio::test]
     async fn epic_candidates_come_from_project_group() {
         let c = client(vec![
-            ok(r#"{"id":11,"path_with_namespace":"group/alpha","namespace":{"id":9,"kind":"group","full_path":"group"}}"#),
+            ok(
+                r#"{"id":11,"path_with_namespace":"group/alpha","namespace":{"id":9,"kind":"group","full_path":"group"}}"#,
+            ),
             ok(r#"[{"id":42,"iid":3,"title":"基盤整備"}]"#),
         ]);
         let got = c
@@ -1135,8 +1146,7 @@ mod tests {
     /// 計画 9: 期間を持つ前の保持データ (id と name だけ) をそのまま読める。
     #[test]
     fn candidate_cache_without_period_loads() {
-        let got: Candidate =
-            serde_json::from_str(r#"{"id":"1","name":"report"}"#).expect("読める");
+        let got: Candidate = serde_json::from_str(r#"{"id":"1","name":"report"}"#).expect("読める");
         assert_eq!(got.name, "report");
         assert_eq!(got.start_date, None);
         assert_eq!(got.due_date, None);

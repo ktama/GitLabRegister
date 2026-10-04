@@ -84,7 +84,9 @@ impl HttpResponse {
     }
 
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.get(&name.to_ascii_lowercase()).map(|v| v.as_str())
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(|v| v.as_str())
     }
 
     pub fn is_success(&self) -> bool {
@@ -268,23 +270,20 @@ impl ReqwestTransport {
             ProxyChoice::FollowSystem => builder,
             ProxyChoice::Direct => builder.no_proxy(),
             ProxyChoice::Manual { url, credentials } => {
-                let mut p = reqwest::Proxy::all(url).map_err(|e| {
-                    TransportSetupError::InvalidProxy {
+                let mut p =
+                    reqwest::Proxy::all(url).map_err(|e| TransportSetupError::InvalidProxy {
                         url: url.clone(),
                         detail: e.to_string(),
-                    }
-                })?;
+                    })?;
                 if let Some((user, password)) = credentials {
                     p = p.basic_auth(user, password);
                 }
                 builder.proxy(p)
             }
         };
-        let client = builder
-            .build()
-            .map_err(|e| TransportSetupError::Build {
-                detail: e.to_string(),
-            })?;
+        let client = builder.build().map_err(|e| TransportSetupError::Build {
+            detail: e.to_string(),
+        })?;
         Ok(Self {
             base_url: trimmed.to_string(),
             client,
@@ -351,7 +350,10 @@ impl ReqwestTransport {
 impl HttpTransport for ReqwestTransport {
     /// 送るたびにトークンを取り出す。通信口は値を保持しない (NFR-05)。
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
-        let token = self.tokens.token_value().ok_or(TransportError::MissingToken)?;
+        let token = self
+            .tokens
+            .token_value()
+            .ok_or(TransportError::MissingToken)?;
         self.send_with_token(request, &token).await
     }
 }
@@ -387,16 +389,23 @@ mod tests {
     /// NFR-06: 接続先が HTTPS でなければ通信口を作らない。
     #[test]
     fn transport_rejects_non_https_url() {
-        let err = ReqwestTransport::new("http://gitlab.example.com", &ProxyChoice::FollowSystem, tokens())
-            .expect_err("拒否される");
+        let err = ReqwestTransport::new(
+            "http://gitlab.example.com",
+            &ProxyChoice::FollowSystem,
+            tokens(),
+        )
+        .expect_err("拒否される");
         assert!(matches!(err, TransportSetupError::NotHttps { .. }), "{err}");
     }
 
     #[test]
     fn transport_accepts_https_url_and_trims_trailing_slash() {
-        let transport =
-            ReqwestTransport::new("https://gitlab.example.com/", &ProxyChoice::FollowSystem, tokens())
-                .expect("作れる");
+        let transport = ReqwestTransport::new(
+            "https://gitlab.example.com/",
+            &ProxyChoice::FollowSystem,
+            tokens(),
+        )
+        .expect("作れる");
         assert_eq!(transport.base_url, "https://gitlab.example.com");
     }
 
@@ -404,7 +413,10 @@ mod tests {
     fn transport_rejects_unparsable_url() {
         let err = ReqwestTransport::new("これはURLではない", &ProxyChoice::FollowSystem, tokens())
             .expect_err("拒否される");
-        assert!(matches!(err, TransportSetupError::InvalidUrl { .. }), "{err}");
+        assert!(
+            matches!(err, TransportSetupError::InvalidUrl { .. }),
+            "{err}"
+        );
     }
 
     /// NFR-17: プロキシの 3 つの指定すべてで通信口を作れる。
@@ -455,7 +467,10 @@ mod tests {
         assert_eq!(get.query, vec![("per_page".to_string(), "100".to_string())]);
         assert!(get.body.is_none());
 
-        let post = HttpRequest::post("/api/v4/projects/1/issues", serde_json::json!({"title": "a"}));
+        let post = HttpRequest::post(
+            "/api/v4/projects/1/issues",
+            serde_json::json!({"title": "a"}),
+        );
         assert_eq!(post.method, Method::Post);
         assert!(post.body.is_some());
     }
@@ -488,9 +503,12 @@ mod tests {
     /// NFR-07: 通信口の表示にトークンの供給元を含めない。
     #[test]
     fn transport_debug_output_hides_token_source() {
-        let transport =
-            ReqwestTransport::new("https://gitlab.example.com", &ProxyChoice::FollowSystem, tokens())
-                .expect("作れる");
+        let transport = ReqwestTransport::new(
+            "https://gitlab.example.com",
+            &ProxyChoice::FollowSystem,
+            tokens(),
+        )
+        .expect("作れる");
         let shown = format!("{transport:?}");
         assert!(!shown.contains("glpat-test-token"), "{shown}");
         assert!(shown.contains("gitlab.example.com"), "{shown}");

@@ -171,7 +171,11 @@ impl ExpansionService {
     }
 
     /// 登録に成功した発生日を索引へ加える (FR-09、FR-11)。
-    pub fn record_registered(&self, schedule_id: &gitlabregister_core::model::ScheduleId, date: NaiveDate) {
+    pub fn record_registered(
+        &self,
+        schedule_id: &gitlabregister_core::model::ScheduleId,
+        date: NaiveDate,
+    ) {
         if let Some(index) = self.index.write().expect("施錠できる").as_mut() {
             index.record(schedule_id, date);
         }
@@ -179,11 +183,9 @@ impl ExpansionService {
 
     /// 指定した期間を展開してプレビューを組み立てる (FR-07)。
     pub fn expand(&self, start: NaiveDate, end: NaiveDate) -> Result<Preview, ExpandError> {
-        let range = DateRange::new(start, end)
-            .ok_or(ExpandError::RangeReversed { start, end })?;
+        let range = DateRange::new(start, end).ok_or(ExpandError::RangeReversed { start, end })?;
 
-        let schedules: Vec<Schedule> =
-            self.config.load_schedules().map_err(ExpandError::Store)?;
+        let schedules: Vec<Schedule> = self.config.load_schedules().map_err(ExpandError::Store)?;
         let holidays: Vec<Holiday> = self.config.load_holidays().map_err(ExpandError::Store)?;
         let mut warnings = Vec::new();
 
@@ -526,7 +528,11 @@ mod tests {
             .iter()
             .find(|w| matches!(w, PreviewWarning::YearWithoutHolidays { year: 2026, .. }))
             .expect("警告がある");
-        assert!(warning.describe().contains("2026"), "{}", warning.describe());
+        assert!(
+            warning.describe().contains("2026"),
+            "{}",
+            warning.describe()
+        );
     }
 
     /// EC-05: 上限を超えると警告し、一括登録を実行できない。
@@ -678,7 +684,11 @@ mod tests {
             .iter()
             .find(|w| matches!(w, PreviewWarning::InterruptedRegistration { .. }))
             .expect("警告がある");
-        assert!(warning.describe().contains("重複"), "{}", warning.describe());
+        assert!(
+            warning.describe().contains("重複"),
+            "{}",
+            warning.describe()
+        );
         assert!(warning.describe().contains("20"), "{}", warning.describe());
     }
 
@@ -707,7 +717,9 @@ mod tests {
     #[test]
     fn expansion_resolve_preset_uses_given_today() {
         let f = fixture();
-        let range = f.service.resolve_preset(RangePreset::NextMonth, d(2026, 10, 5));
+        let range = f
+            .service
+            .resolve_preset(RangePreset::NextMonth, d(2026, 10, 5));
         assert_eq!(range.start, d(2026, 11, 1));
         assert_eq!(range.end, d(2026, 11, 30));
     }

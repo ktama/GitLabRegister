@@ -11,7 +11,7 @@ use gitlabregister_app::expansion::{Preview, PreviewWarning};
 use gitlabregister_app::masterdata::HistoryFilter;
 use gitlabregister_app::registration::{BatchOutcome, ItemStatus, Progress, RegistrationItem};
 use gitlabregister_core::expand::RangePreset;
-use gitlabregister_core::model::{Holiday, HistoryEntry, IssueTemplate, Schedule, ScheduleId};
+use gitlabregister_core::model::{HistoryEntry, Holiday, IssueTemplate, Schedule, ScheduleId};
 use gitlabregister_infra::gitlab::client::CandidateKind;
 use gitlabregister_infra::store::{AppSettings, ImportConflictPolicy, Project};
 use gitlabregister_infra::Level;
@@ -245,11 +245,8 @@ fn to_preview_view(
                     .find(|s| s.id == c.occurrence.schedule_id)
                     .map(|s| s.issue.clone())
                     .unwrap_or_default();
-                let (iteration_id, iteration_unresolved) = assign_iteration(
-                    &template,
-                    c.occurrence.date,
-                    iterations.get(&c.project),
-                );
+                let (iteration_id, iteration_unresolved) =
+                    assign_iteration(&template, c.occurrence.date, iterations.get(&c.project));
                 CandidateRow {
                     schedule_id: c.occurrence.schedule_id.0.clone(),
                     schedule_name: c.schedule_name.clone(),
@@ -275,8 +272,13 @@ fn to_preview_view(
             })
             .collect(),
     };
-    let unresolved = view.candidates.iter().filter(|c| c.iteration_unresolved).count();
-    view.warnings.extend(unresolved_iteration_warning(unresolved));
+    let unresolved = view
+        .candidates
+        .iter()
+        .filter(|c| c.iteration_unresolved)
+        .count();
+    view.warnings
+        .extend(unresolved_iteration_warning(unresolved));
     view
 }
 
@@ -502,11 +504,7 @@ pub fn disconnect(state: State<'_, AppState>) -> ConnectionView {
 
 #[tauri::command]
 pub fn list_schedules(state: State<'_, AppState>) -> UiResult<Vec<Schedule>> {
-    state
-        .boundary
-        .schedules
-        .list()
-        .map_err(UiError::storage)
+    state.boundary.schedules.list().map_err(UiError::storage)
 }
 
 #[tauri::command]
@@ -544,11 +542,7 @@ pub fn duplicate_schedule(state: State<'_, AppState>, id: String) -> UiResult<Sc
 }
 
 #[tauri::command]
-pub fn set_schedule_enabled(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> UiResult<()> {
+pub fn set_schedule_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> UiResult<()> {
     state
         .boundary
         .schedules
@@ -564,10 +558,7 @@ pub fn set_schedule_enabled(
 }
 
 #[tauri::command]
-pub fn delete_schedule_confirmation(
-    state: State<'_, AppState>,
-    id: String,
-) -> UiResult<String> {
+pub fn delete_schedule_confirmation(state: State<'_, AppState>, id: String) -> UiResult<String> {
     state
         .boundary
         .schedules
@@ -612,7 +603,10 @@ pub fn pattern_change_confirmation(
 // ---- 展開とプレビュー ----
 
 #[tauri::command]
-pub fn resolve_preset(state: State<'_, AppState>, preset: String) -> UiResult<(NaiveDate, NaiveDate)> {
+pub fn resolve_preset(
+    state: State<'_, AppState>,
+    preset: String,
+) -> UiResult<(NaiveDate, NaiveDate)> {
     let preset = match preset.as_str() {
         "this_week" => RangePreset::ThisWeek,
         "this_month" => RangePreset::ThisMonth,
@@ -637,11 +631,7 @@ pub fn expand(
     end: NaiveDate,
 ) -> UiResult<PreviewView> {
     let preview = state.boundary.expand(start, end).map_err(UiError::from)?;
-    let schedules = state
-        .boundary
-        .schedules
-        .list()
-        .map_err(UiError::storage)?;
+    let schedules = state.boundary.schedules.list().map_err(UiError::storage)?;
     // 発生日で決める指定を持つ定義の登録先だけ、保持済みのイテレーション候補を読む。
     let iterations: BTreeMap<String, CandidateList> = schedules
         .iter()
@@ -729,10 +719,7 @@ pub async fn retry_failed(
 
 /// 単発登録する (FR-12)。
 #[tauri::command]
-pub async fn register_single(
-    state: State<'_, AppState>,
-    row: CandidateRow,
-) -> UiResult<ResultRow> {
+pub async fn register_single(state: State<'_, AppState>, row: CandidateRow) -> UiResult<ResultRow> {
     let client = state.client().ok_or_else(UiError::not_connected)?;
     let item = row.to_item();
     let status = state
@@ -741,10 +728,7 @@ pub async fn register_single(
         .await
         .map_err(UiError::from)?;
     let outcome = BatchOutcome {
-        outcomes: vec![gitlabregister_app::ItemOutcome {
-            item,
-            status,
-        }],
+        outcomes: vec![gitlabregister_app::ItemOutcome { item, status }],
         aborted: None,
         cancelled: false,
     };
@@ -1071,12 +1055,10 @@ fn parse_kind(kind: &str) -> UiResult<CandidateKind> {
         "milestone" => CandidateKind::Milestone,
         "epic" => CandidateKind::Epic,
         "iteration" => CandidateKind::Iteration,
-        other => {
-            return Err(UiError::input(
-                format!("知らない候補の種別です: {other}"),
-                "ラベル・担当者・マイルストーン・エピック・イテレーションのいずれかを指定してください",
-            ))
-        }
+        other => return Err(UiError::input(
+            format!("知らない候補の種別です: {other}"),
+            "ラベル・担当者・マイルストーン・エピック・イテレーションのいずれかを指定してください",
+        )),
     })
 }
 
@@ -1306,7 +1288,10 @@ mod tests {
             assign_iteration(&template, ymd(2026, 11, 2), Some(&sprints())),
             (None, true)
         );
-        assert_eq!(assign_iteration(&template, ymd(2026, 10, 3), None), (None, true));
+        assert_eq!(
+            assign_iteration(&template, ymd(2026, 10, 3), None),
+            (None, true)
+        );
         assert_eq!(unresolved_iteration_warning(0), None);
         let warning = unresolved_iteration_warning(3).expect("警告が出る");
         assert!(warning.contains("3 件"), "{warning}");
@@ -1330,8 +1315,14 @@ mod tests {
         assert_eq!(issue_url("http://gitlab.example.com", "g/p", "#1"), None);
         assert_eq!(issue_url("file:///C:/Windows", "g/p", "#1"), None);
         assert_eq!(issue_url("https://", "g/p", "#1"), None);
-        assert_eq!(issue_url("https://gitlab.example.com", "g/../p", "#1"), None);
-        assert_eq!(issue_url("https://gitlab.example.com", "g/p?x=1", "#1"), None);
+        assert_eq!(
+            issue_url("https://gitlab.example.com", "g/../p", "#1"),
+            None
+        );
+        assert_eq!(
+            issue_url("https://gitlab.example.com", "g/p?x=1", "#1"),
+            None
+        );
         assert_eq!(issue_url("https://gitlab.example.com", "", "#1"), None);
         assert_eq!(issue_url("https://gitlab.example.com", "g/p", "12"), None);
         assert_eq!(issue_url("https://gitlab.example.com", "g/p", "#1a"), None);

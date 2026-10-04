@@ -7,6 +7,10 @@ pub mod client;
 pub mod error;
 pub mod transport;
 
-pub use client::{Candidate, CandidateKind, Connection, GitLabClient, NewIssue, RetryPolicy, Tier, Version};
+pub use client::{
+    Candidate, CandidateKind, Connection, GitLabClient, NewIssue, RetryPolicy, Tier, Version,
+};
 pub use error::{ErrorKind, GitLabError};
-pub use transport::{HttpRequest, HttpResponse, HttpTransport, Method, ProxyChoice, TransportError};
+pub use transport::{
+    HttpRequest, HttpResponse, HttpTransport, Method, ProxyChoice, TransportError,
+};

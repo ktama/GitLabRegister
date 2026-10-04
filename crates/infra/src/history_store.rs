@@ -190,8 +190,10 @@ mod tests {
     fn history_store_append_and_load_round_trip() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
-        s.append(&entry("X", "定義X", d(2026, 10, 12))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 12)))
+            .expect("追記");
         let loaded = s.load().expect("読める");
         assert_eq!(loaded.entries.len(), 2);
         assert_eq!(loaded.entries[0].occurrence_date, d(2026, 10, 5));
@@ -203,8 +205,10 @@ mod tests {
     fn history_store_file_is_line_per_entry_and_readable() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "月次報告", d(2026, 10, 5))).expect("追記");
-        s.append(&entry("Y", "週次進捗", d(2026, 10, 6))).expect("追記");
+        s.append(&entry("X", "月次報告", d(2026, 10, 5)))
+            .expect("追記");
+        s.append(&entry("Y", "週次進捗", d(2026, 10, 6)))
+            .expect("追記");
         let text = fs::read_to_string(s.path()).expect("読める");
         assert_eq!(text.lines().count(), 2, "1 行 1 件になっていない: {text}");
         assert!(text.contains("月次報告"));
@@ -218,7 +222,8 @@ mod tests {
     fn history_store_append_is_durable_per_entry() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         // ここで中断したとみなし、別の読み手で確認する。
         let reread = HistoryStore::new(s.path()).load().expect("読める");
         assert_eq!(reread.entries.len(), 1);
@@ -252,7 +257,8 @@ mod tests {
     fn history_store_removed_date_becomes_candidate_again() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         let before = HistoryIndex::build(&s.load().expect("読める").entries);
         assert!(before.is_registered(&ScheduleId("X".into()), d(2026, 10, 5)));
 
@@ -267,7 +273,8 @@ mod tests {
     fn history_store_remove_absent_key_changes_nothing() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         let removed = s
             .remove(&[(ScheduleId("Z".into()), d(2026, 1, 1))])
             .expect("削除");
@@ -280,7 +287,8 @@ mod tests {
     fn history_store_skips_malformed_line_and_reports_it() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         let mut text = fs::read_to_string(s.path()).expect("読める");
         text.push_str("{ this is not json\n");
         text.push_str(
@@ -311,7 +319,8 @@ mod tests {
     fn history_store_replace_all() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         s.replace_all(&[entry("Y", "定義Y", d(2026, 11, 1))])
             .expect("置き換え");
         let loaded = s.load().expect("読める");
@@ -324,7 +333,8 @@ mod tests {
     fn history_store_remove_leaves_no_temp_file() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.append(&entry("X", "定義X", d(2026, 10, 5))).expect("追記");
+        s.append(&entry("X", "定義X", d(2026, 10, 5)))
+            .expect("追記");
         s.remove(&[(ScheduleId("X".into()), d(2026, 10, 5))])
             .expect("削除");
         let leftovers: Vec<_> = fs::read_dir(dir.path())
@@ -333,6 +343,9 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .filter(|n| n.ends_with(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "一時ファイルが残っている: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "一時ファイルが残っている: {leftovers:?}"
+        );
     }
 }

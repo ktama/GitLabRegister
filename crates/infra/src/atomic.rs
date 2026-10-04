@@ -32,7 +32,10 @@ impl<T> Document<T> {
 #[derive(Debug)]
 pub enum StoreError {
     /// 入出力に失敗した。
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// 形式が解釈できない。
     Malformed { path: PathBuf, detail: String },
     /// アプリが扱える版より新しい (EC-28)。
@@ -194,7 +197,10 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .filter(|n| n.ends_with(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "一時ファイルが残っている: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "一時ファイルが残っている: {leftovers:?}"
+        );
     }
 
     #[test]
@@ -231,7 +237,8 @@ mod tests {
     #[test]
     fn schema_load_missing_file_is_none() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
-        let loaded: Option<Body> = load_document(&dir.path().join("absent.json")).expect("失敗しない");
+        let loaded: Option<Body> =
+            load_document(&dir.path().join("absent.json")).expect("失敗しない");
         assert!(loaded.is_none());
     }
 

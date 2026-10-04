@@ -166,10 +166,7 @@ impl ScheduleService {
     }
 
     /// 削除の前に示す確認の内容を組み立てる (EC-26)。
-    pub fn delete_confirmation(
-        &self,
-        id: &ScheduleId,
-    ) -> Result<DeleteConfirmation, SaveError> {
+    pub fn delete_confirmation(&self, id: &ScheduleId) -> Result<DeleteConfirmation, SaveError> {
         let current = self.config.load_schedules().map_err(SaveError::Store)?;
         let target = current
             .iter()
@@ -225,12 +222,8 @@ impl ScheduleService {
         let loaded = self.history.load().map_err(SaveError::Store)?;
         let index = HistoryIndex::build(&loaded.entries);
 
-        let raw = recurrence::occurrences(
-            &changed.pattern,
-            &changed.active_period,
-            range,
-            &calendar,
-        );
+        let raw =
+            recurrence::occurrences(&changed.pattern, &changed.active_period, range, &calendar);
         let mut new_occurrences = Vec::new();
         for original in raw {
             if let Some(date) = calendar.adjust(original, changed.adjustment) {
@@ -506,7 +499,11 @@ mod tests {
             .delete_confirmation(&ScheduleId("s1".into()))
             .expect("取得できる");
         assert_eq!(confirmation.history_count, 2);
-        assert!(confirmation.describe().contains("2 件"), "{}", confirmation.describe());
+        assert!(
+            confirmation.describe().contains("2 件"),
+            "{}",
+            confirmation.describe()
+        );
         assert!(
             confirmation.describe().contains("削除されず"),
             "履歴が残ることが伝わらない"
@@ -532,7 +529,9 @@ mod tests {
             })
             .expect("追記できる");
 
-        f.service.delete(&ScheduleId("s1".into())).expect("削除できる");
+        f.service
+            .delete(&ScheduleId("s1".into()))
+            .expect("削除できる");
         assert!(f.service.list().expect("読める").is_empty());
         let history = store.load().expect("読める");
         assert_eq!(history.entries.len(), 1);
@@ -638,7 +637,11 @@ mod tests {
             .expect("取得できる")
             .expect("確認が必要");
         assert_eq!(confirmation.new_occurrences, vec![d(2026, 10, 10)]);
-        assert!(confirmation.describe().contains("2026-10-10"), "{}", confirmation.describe());
+        assert!(
+            confirmation.describe().contains("2026-10-10"),
+            "{}",
+            confirmation.describe()
+        );
     }
 
     /// EC-30: 変更しても未登録の発生日が生じなければ確認は不要。

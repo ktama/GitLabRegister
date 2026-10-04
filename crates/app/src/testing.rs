@@ -8,7 +8,10 @@ use gitlabregister_infra::testing::FakeTransport;
 pub fn client_with(
     responses: Vec<Result<HttpResponse, TransportError>>,
 ) -> GitLabClient<FakeTransport> {
-    GitLabClient::with_retry(FakeTransport::new(responses), RetryPolicy::without_waiting())
+    GitLabClient::with_retry(
+        FakeTransport::new(responses),
+        RetryPolicy::without_waiting(),
+    )
 }
 
 pub fn ok(body: &str) -> Result<HttpResponse, TransportError> {

@@ -53,8 +53,9 @@ impl AppPaths {
     /// `APPDATA` を使う。利用者ごとに分かれ、他の Windows ユーザーから読めない場所であるため
     /// NFR-09 を満たす。
     pub fn from_environment() -> Result<Self, PathsError> {
-        let appdata = std::env::var_os("APPDATA")
-            .ok_or(PathsError::UserProfileUnavailable { variable: "APPDATA" })?;
+        let appdata = std::env::var_os("APPDATA").ok_or(PathsError::UserProfileUnavailable {
+            variable: "APPDATA",
+        })?;
         Ok(Self::with_root(Path::new(&appdata).join(APP_FOLDER_NAME)))
     }
 

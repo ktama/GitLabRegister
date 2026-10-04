@@ -316,7 +316,10 @@ mod tests {
     #[test]
     fn logger_redact_without_secret_is_unchanged() {
         let logger = Logger::new("dummy.log");
-        assert_eq!(logger.redact("通常のログ 2026-10-05"), "通常のログ 2026-10-05");
+        assert_eq!(
+            logger.redact("通常のログ 2026-10-05"),
+            "通常のログ 2026-10-05"
+        );
     }
 
     /// NFR-10: 上限に達すると世代が切り替わり、過去の世代が残る。

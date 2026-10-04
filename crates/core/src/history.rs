@@ -26,8 +26,7 @@ impl HistoryIndex {
     }
 
     pub fn is_registered(&self, schedule_id: &ScheduleId, date: NaiveDate) -> bool {
-        self.registered
-            .contains(&(schedule_id.clone(), date))
+        self.registered.contains(&(schedule_id.clone(), date))
     }
 
     pub fn len(&self) -> usize {
@@ -87,10 +86,8 @@ mod tests {
     #[test]
     fn history_excludes_registered() {
         let index = HistoryIndex::build(&[entry("X", "定義X", d(2026, 10, 5))]);
-        let (candidates, excluded) = index.partition(
-            &ScheduleId("X".into()),
-            &[d(2026, 10, 5), d(2026, 10, 12)],
-        );
+        let (candidates, excluded) =
+            index.partition(&ScheduleId("X".into()), &[d(2026, 10, 5), d(2026, 10, 12)]);
         assert_eq!(candidates, vec![d(2026, 10, 12)]);
         assert_eq!(excluded, vec![d(2026, 10, 5)]);
     }
@@ -99,8 +96,7 @@ mod tests {
     #[test]
     fn history_keeps_other_schedule() {
         let index = HistoryIndex::build(&[entry("X", "定義X", d(2026, 10, 5))]);
-        let (candidates, excluded) =
-            index.partition(&ScheduleId("Y".into()), &[d(2026, 10, 5)]);
+        let (candidates, excluded) = index.partition(&ScheduleId("Y".into()), &[d(2026, 10, 5)]);
         assert_eq!(candidates, vec![d(2026, 10, 5)]);
         assert!(excluded.is_empty());
     }

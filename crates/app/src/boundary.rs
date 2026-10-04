@@ -199,11 +199,7 @@ impl Boundary {
         self.expand_with_labels(start, end)
     }
 
-    fn expand_with_labels(
-        &self,
-        start: NaiveDate,
-        end: NaiveDate,
-    ) -> Result<Preview, Failure> {
+    fn expand_with_labels(&self, start: NaiveDate, end: NaiveDate) -> Result<Preview, Failure> {
         // 保持している候補をラベルの突合へ渡す。取得していないプロジェクトは
         // ExpansionService 側で「突合できなかった」として扱われる。
         if let Ok(projects) = self.config.load_schedules() {
@@ -446,10 +442,9 @@ mod tests {
         }
     }
 
-    fn created(iid: u64) -> Result<
-        gitlabregister_infra::gitlab::transport::HttpResponse,
-        TransportError,
-    > {
+    fn created(
+        iid: u64,
+    ) -> Result<gitlabregister_infra::gitlab::transport::HttpResponse, TransportError> {
         ok(&format!(
             r#"{{"id":{},"iid":{iid},"web_url":"https://gitlab.example.com/-/issues/{iid}"}}"#,
             1000 + iid
@@ -513,10 +508,10 @@ mod tests {
             .expand(d(2026, 10, 1), d(2026, 10, 31))
             .expect("展開できる");
         assert!(
-            preview.warnings.iter().any(|w| matches!(
-                w,
-                crate::expansion::PreviewWarning::UnknownLabels { .. }
-            )),
+            preview
+                .warnings
+                .iter()
+                .any(|w| matches!(w, crate::expansion::PreviewWarning::UnknownLabels { .. })),
             "{:?}",
             preview.warnings
         );
@@ -676,10 +671,7 @@ mod tests {
     #[tokio::test]
     async fn boundary_retry_failed_items() {
         let f = fixture();
-        let client = client_with(vec![
-            created(1),
-            status(400, r#"{"message":"invalid"}"#),
-        ]);
+        let client = client_with(vec![created(1), status(400, r#"{"message":"invalid"}"#)]);
         let first = f
             .boundary
             .register_batch(

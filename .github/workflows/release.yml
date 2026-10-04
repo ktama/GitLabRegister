@@ -1,0 +1,78 @@
+name: Release
+
+# v0.1.0 のようなタグを push すると、Windows 向けのポータブル zip を作って GitHub Release に添付する。
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version
+        # タグ、Cargo.toml、tauri.conf.json のバージョンが食い違ったまま配布しないための確認。
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          $tauri = (Get-Content crates/desktop/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($cargo -ne $version -or $tauri -ne $version) {
+            Write-Error "タグ ($version) と Cargo.toml ($cargo)、tauri.conf.json ($tauri) のバージョンが一致しません。"
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked -p gitlabregister-desktop --features custom-protocol
+
+      - name: Package
+        # NFR-12: フォルダに展開するだけで実行できる形で配布する。
+        run: |
+          $name = "GitLabRegister-$env:VERSION-windows-x64"
+          $dir = "dist/$name"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target/release/gitlabregister-desktop.exe "$dir/GitLabRegister.exe"
+          Copy-Item README.md, LICENSE, CHANGELOG.md $dir
+          Compress-Archive -Path $dir -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+          "ASSET=dist/$name.zip" >> $env:GITHUB_ENV
+
+      - name: Extract release notes
+        # CHANGELOG.md の該当バージョンの節をリリースノートにする。
+        run: |
+          $lines = Get-Content CHANGELOG.md -Encoding utf8
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($env:VERSION))\]").LineNumber
+          if (-not $start) {
+            Write-Error "CHANGELOG.md に ## [$env:VERSION] の節がありません。"
+            exit 1
+          }
+          $body = @()
+          foreach ($line in $lines[$start..($lines.Count - 1)]) {
+            if ($line -match '^## \[' -or $line -match '^\[.+\]: ') { break }
+            $body += $line
+          }
+          ($body -join "`n").Trim() | Out-File -Encoding utf8 dist/RELEASE_NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: GitLabRegister ${{ env.VERSION }}
+          body_path: dist/RELEASE_NOTES.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256

@@ -109,7 +109,11 @@ fn week_start(date: NaiveDate) -> NaiveDate {
     date - Days::new(u64::from(offset))
 }
 
-fn monthly_by_day(day: MonthlyDay, on_missing: MissingDayPolicy, range: &DateRange) -> Vec<NaiveDate> {
+fn monthly_by_day(
+    day: MonthlyDay,
+    on_missing: MissingDayPolicy,
+    range: &DateRange,
+) -> Vec<NaiveDate> {
     months_in(range)
         .filter_map(|(year, month)| match day {
             MonthlyDay::LastDay => Some(last_day_of_month(year, month)),
@@ -215,7 +219,10 @@ mod tests {
 
     #[test]
     fn daily_covers_every_day_in_range() {
-        let got = run(&RecurrencePattern::Daily, range((2026, 10, 1), (2026, 10, 5)));
+        let got = run(
+            &RecurrencePattern::Daily,
+            range((2026, 10, 1), (2026, 10, 5)),
+        );
         assert_eq!(got.len(), 5);
         assert_eq!(got.first(), Some(&d(2026, 10, 1)));
         assert_eq!(got.last(), Some(&d(2026, 10, 5)));
@@ -248,7 +255,12 @@ mod tests {
         );
         assert_eq!(
             got,
-            vec![d(2026, 10, 1), d(2026, 10, 4), d(2026, 10, 7), d(2026, 10, 10)]
+            vec![
+                d(2026, 10, 1),
+                d(2026, 10, 4),
+                d(2026, 10, 7),
+                d(2026, 10, 10)
+            ]
         );
     }
 
@@ -328,10 +340,7 @@ mod tests {
         assert_eq!(november_only, vec![d(2026, 11, 3), d(2026, 11, 17)]);
 
         let two_months = run(&pattern, range((2026, 10, 1), (2026, 11, 30)));
-        let november_part: Vec<_> = two_months
-            .into_iter()
-            .filter(|d| d.month() == 11)
-            .collect();
+        let november_part: Vec<_> = two_months.into_iter().filter(|d| d.month() == 11).collect();
         assert_eq!(november_only, november_part);
     }
 
@@ -411,10 +420,7 @@ mod tests {
             },
             range((2026, 10, 1), (2026, 12, 31)),
         );
-        assert_eq!(
-            got,
-            vec![d(2026, 10, 13), d(2026, 11, 10), d(2026, 12, 8)]
-        );
+        assert_eq!(got, vec![d(2026, 10, 13), d(2026, 11, 10), d(2026, 12, 8)]);
     }
 
     /// FR-04 / EC-20: 毎月 31 日・末日に繰り上げ。2026-02 は 2026-02-28。
@@ -452,10 +458,7 @@ mod tests {
             },
             range((2026, 1, 1), (2026, 3, 31)),
         );
-        assert_eq!(
-            got,
-            vec![d(2026, 1, 31), d(2026, 2, 28), d(2026, 3, 31)]
-        );
+        assert_eq!(got, vec![d(2026, 1, 31), d(2026, 2, 28), d(2026, 3, 31)]);
     }
 
     /// EC-21: その月に第 5 金曜が存在しない月は算出しない。
@@ -469,11 +472,10 @@ mod tests {
             range((2026, 1, 1), (2026, 12, 31)),
         );
         // 第 5 金曜がある月のみ。全 12 か月より少ない。
-        assert!(
-            got.len() < 12,
-            "第 5 金曜のない月が除かれていない: {got:?}"
-        );
-        assert!(got.iter().all(|d| WeekdayKey::from_date(*d) == WeekdayKey::Fri));
+        assert!(got.len() < 12, "第 5 金曜のない月が除かれていない: {got:?}");
+        assert!(got
+            .iter()
+            .all(|d| WeekdayKey::from_date(*d) == WeekdayKey::Fri));
         // 算出された日はすべてその月の 5 番目の金曜 = 29 日以降。
         assert!(got.iter().all(|d| d.day() >= 29));
     }
@@ -486,10 +488,7 @@ mod tests {
             &RecurrencePattern::Yearly { month: 4, day: 1 },
             range((2026, 1, 1), (2028, 12, 31)),
         );
-        assert_eq!(
-            got,
-            vec![d(2026, 4, 1), d(2027, 4, 1), d(2028, 4, 1)]
-        );
+        assert_eq!(got, vec![d(2026, 4, 1), d(2027, 4, 1), d(2028, 4, 1)]);
     }
 
     /// EC-22: 毎年 2 月 29 日。閏年でない年は算出しない。2028 は閏年。

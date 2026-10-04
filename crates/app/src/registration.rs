@@ -179,11 +179,17 @@ pub enum AbortReason {
 
 impl BatchOutcome {
     pub fn succeeded(&self) -> usize {
-        self.outcomes.iter().filter(|o| o.status.is_success()).count()
+        self.outcomes
+            .iter()
+            .filter(|o| o.status.is_success())
+            .count()
     }
 
     pub fn failed(&self) -> usize {
-        self.outcomes.iter().filter(|o| o.status.is_failure()).count()
+        self.outcomes
+            .iter()
+            .filter(|o| o.status.is_failure())
+            .count()
     }
 
     pub fn not_attempted(&self) -> usize {
@@ -556,20 +562,17 @@ mod tests {
         }
     }
 
-    fn created(iid: u64) -> Result<
-        gitlabregister_infra::gitlab::transport::HttpResponse,
-        TransportError,
-    > {
+    fn created(
+        iid: u64,
+    ) -> Result<gitlabregister_infra::gitlab::transport::HttpResponse, TransportError> {
         ok(&format!(
             r#"{{"id":{},"iid":{iid},"web_url":"https://gitlab.example.com/-/issues/{iid}"}}"#,
             1000 + iid
         ))
     }
 
-    fn iteration_ok() -> Result<
-        gitlabregister_infra::gitlab::transport::HttpResponse,
-        TransportError,
-    > {
+    fn iteration_ok(
+    ) -> Result<gitlabregister_infra::gitlab::transport::HttpResponse, TransportError> {
         ok(r#"{"data":{"issueSetIteration":{"errors":[]}}}"#)
     }
 
@@ -626,7 +629,11 @@ mod tests {
             .await;
 
         let progress = seen.lock().expect("施錠できる").clone();
-        assert_eq!(progress.len(), 3, "1 件ごとに通知されていない: {progress:?}");
+        assert_eq!(
+            progress.len(),
+            3,
+            "1 件ごとに通知されていない: {progress:?}"
+        );
         assert_eq!(progress.last().expect("ある").completed, 3);
         assert!(progress.iter().all(|p| p.total == 3));
     }
@@ -908,7 +915,8 @@ mod tests {
         assert_eq!(outcome.succeeded(), 1);
         match &outcome.outcomes[0].status {
             ItemStatus::Succeeded { dropped_fields, .. } => {
-                for expected in ["複数担当者", "エピック", "ウェイト", "イテレーション"] {
+                for expected in ["複数担当者", "エピック", "ウェイト", "イテレーション"]
+                {
                     assert!(
                         dropped_fields.iter().any(|d| d == expected),
                         "{expected} が外されていない: {dropped_fields:?}"
@@ -919,7 +927,8 @@ mod tests {
         }
         // EE 固有項目を送っていない。
         let body = client
-            .transport().last_request()
+            .transport()
+            .last_request()
             .expect("送信された")
             .body
             .expect("本文がある");
@@ -934,10 +943,7 @@ mod tests {
     #[tokio::test]
     async fn registration_retry_failed_only() {
         let f = fixture();
-        let client = client_with(vec![
-            created(1),
-            status(400, r#"{"message":"invalid"}"#),
-        ]);
+        let client = client_with(vec![created(1), status(400, r#"{"message":"invalid"}"#)]);
         let items = vec![item("A", 1), item("B", 2)];
         let first = f
             .service
@@ -1117,7 +1123,13 @@ mod tests {
     #[tokio::test]
     async fn registration_concurrency_handles_odd_counts() {
         let f = fixture_with_concurrency(2);
-        let client = client_with(vec![created(1), created(2), created(3), created(4), created(5)]);
+        let client = client_with(vec![
+            created(1),
+            created(2),
+            created(3),
+            created(4),
+            created(5),
+        ]);
         let items: Vec<RegistrationItem> = (1..=5).map(|i| item(&format!("S{i}"), i)).collect();
         let outcome = f
             .service

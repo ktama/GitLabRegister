@@ -469,11 +469,15 @@ mod tests {
     fn document_schedules_file_is_human_readable() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.save_schedules(&[schedule("月次報告", 25)]).expect("書ける");
+        s.save_schedules(&[schedule("月次報告", 25)])
+            .expect("書ける");
         let text = std::fs::read_to_string(s.paths().schedules()).expect("読める");
         assert!(text.contains("月次報告"), "定義名が読めない: {text}");
         assert!(text.contains("MonthlyByDay"), "パターンが読めない: {text}");
-        assert!(text.contains("{{年}}年{{月}}月 月次報告"), "タイトルが読めない: {text}");
+        assert!(
+            text.contains("{{年}}年{{月}}月 月次報告"),
+            "タイトルが読めない: {text}"
+        );
     }
 
     /// FR-18: 書き出したファイルをテキストエディタで編集して定義を 1 件追加できる。
@@ -493,8 +497,11 @@ mod tests {
         added["name"] = serde_json::Value::String("四半期棚卸し".into());
         added["id"] = serde_json::Value::String("id-四半期棚卸し".into());
         value["schedules"] = serde_json::Value::Array(vec![list[0].clone(), added]);
-        std::fs::write(&export, serde_json::to_string_pretty(&value).expect("直列化"))
-            .expect("書ける");
+        std::fs::write(
+            &export,
+            serde_json::to_string_pretty(&value).expect("直列化"),
+        )
+        .expect("書ける");
 
         let outcome = s
             .import_schedules(&export, ImportConflictPolicy::Overwrite)
@@ -518,7 +525,9 @@ mod tests {
         let target = store(&target_dir);
         let schedules: Vec<Schedule> = (1..=10).map(|i| schedule(&format!("定義{i}"), i)).collect();
         let file = source_dir.path().join("export.json");
-        source.export_schedules(&schedules, &file).expect("書き出せる");
+        source
+            .export_schedules(&schedules, &file)
+            .expect("書き出せる");
 
         let outcome = target
             .import_schedules(&file, ImportConflictPolicy::Skip)
@@ -532,7 +541,8 @@ mod tests {
     fn transfer_import_overwrite_replaces_existing() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.save_schedules(&[schedule("月次報告", 25)]).expect("書ける");
+        s.save_schedules(&[schedule("月次報告", 25)])
+            .expect("書ける");
 
         let file = dir.path().join("export.json");
         s.export_schedules(&[schedule("月次報告", 10)], &file)
@@ -559,7 +569,8 @@ mod tests {
     fn transfer_import_skip_keeps_existing_and_reports_names() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.save_schedules(&[schedule("月次報告", 25)]).expect("書ける");
+        s.save_schedules(&[schedule("月次報告", 25)])
+            .expect("書ける");
 
         let file = dir.path().join("export.json");
         s.export_schedules(&[schedule("月次報告", 10)], &file)
@@ -585,7 +596,8 @@ mod tests {
     fn transfer_import_malformed_file_changes_nothing() {
         let dir = tempfile::tempdir().expect("一時ディレクトリ");
         let s = store(&dir);
-        s.save_schedules(&[schedule("月次報告", 25)]).expect("書ける");
+        s.save_schedules(&[schedule("月次報告", 25)])
+            .expect("書ける");
         let file = dir.path().join("broken.json");
         std::fs::write(&file, "{ this is not json").expect("書ける");
 
@@ -810,7 +822,8 @@ mod tests {
         let s = store(&dir);
         s.save_settings(&AppSettings::default()).expect("書ける");
         s.save_projects(&[]).expect("書ける");
-        s.save_schedules(&[schedule("月次報告", 25)]).expect("書ける");
+        s.save_schedules(&[schedule("月次報告", 25)])
+            .expect("書ける");
         s.save_holidays(&[]).expect("書ける");
 
         let root = s.paths().root();

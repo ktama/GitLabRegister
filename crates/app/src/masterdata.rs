@@ -2,7 +2,7 @@
 //! (FR-02、FR-13、FR-18、FR-19、FR-22、FR-23、EC-04、EC-27)。
 
 use chrono::NaiveDate;
-use gitlabregister_core::model::{Holiday, HistoryEntry, ScheduleId};
+use gitlabregister_core::model::{HistoryEntry, Holiday, ScheduleId};
 use gitlabregister_infra::atomic::StoreError;
 use gitlabregister_infra::history_store::HistoryStore;
 use gitlabregister_infra::store::{
@@ -198,10 +198,7 @@ impl MasterDataService {
     // ---- 登録履歴 (FR-19、FR-23、EC-27) ----
 
     /// 履歴を絞り込んで返す。登録日時の降順で並べる (FR-19)。
-    pub fn list_history(
-        &self,
-        filter: &HistoryFilter,
-    ) -> Result<Vec<HistoryEntry>, StoreError> {
+    pub fn list_history(&self, filter: &HistoryFilter) -> Result<Vec<HistoryEntry>, StoreError> {
         let loaded = self.history.load()?;
         let mut entries: Vec<HistoryEntry> = loaded
             .entries
@@ -221,10 +218,7 @@ impl MasterDataService {
     }
 
     /// 履歴を削除する (FR-23、EC-27)。GitLab-EE 上の Issue は削除しない。
-    pub fn delete_history(
-        &self,
-        keys: &[(ScheduleId, NaiveDate)],
-    ) -> Result<usize, StoreError> {
+    pub fn delete_history(&self, keys: &[(ScheduleId, NaiveDate)]) -> Result<usize, StoreError> {
         self.history.remove(keys)
     }
 
@@ -373,7 +367,11 @@ mod tests {
             .expect("取得できる");
         assert_eq!(confirmation.referencing_schedules, 2);
         assert!(confirmation.needs_confirmation());
-        assert!(confirmation.describe().contains("2 件"), "{}", confirmation.describe());
+        assert!(
+            confirmation.describe().contains("2 件"),
+            "{}",
+            confirmation.describe()
+        );
     }
 
     /// FR-02: 参照している定義がなければ確認は不要。
@@ -448,7 +446,9 @@ mod tests {
                 name: "文化の日".into(),
             })
             .expect("登録できる");
-        f.service.delete_holiday(d(2026, 11, 3)).expect("削除できる");
+        f.service
+            .delete_holiday(d(2026, 11, 3))
+            .expect("削除できる");
         assert!(f.service.list_holidays().expect("読める").is_empty());
     }
 
@@ -471,7 +471,10 @@ mod tests {
             .into_iter()
             .map(|h| h.date)
             .collect();
-        assert_eq!(dates, vec![d(2026, 12, 1), d(2026, 12, 15), d(2026, 12, 31)]);
+        assert_eq!(
+            dates,
+            vec![d(2026, 12, 1), d(2026, 12, 15), d(2026, 12, 31)]
+        );
     }
 
     /// FR-22: 休日を書き出して取り込める。
@@ -492,10 +495,15 @@ mod tests {
             .expect("0 件ではない");
         assert_eq!(written, 1);
 
-        f.service.delete_holiday(d(2026, 11, 3)).expect("削除できる");
+        f.service
+            .delete_holiday(d(2026, 11, 3))
+            .expect("削除できる");
         let outcome = f.service.import_holidays(&file).expect("取り込める");
         assert_eq!(outcome.added, 1);
-        assert_eq!(f.service.list_holidays().expect("読める")[0].name, "文化の日");
+        assert_eq!(
+            f.service.list_holidays().expect("読める")[0].name,
+            "文化の日"
+        );
     }
 
     /// FR-22: 0 件では書き出しを実行しない。
@@ -535,8 +543,12 @@ mod tests {
     fn masterdata_history_filter_by_schedule_name() {
         let f = fixture();
         let store = HistoryStore::new(f.config.paths().history());
-        store.append(&entry("月次報告", "group/alpha", 5)).expect("追記");
-        store.append(&entry("棚卸し", "group/alpha", 6)).expect("追記");
+        store
+            .append(&entry("月次報告", "group/alpha", 5))
+            .expect("追記");
+        store
+            .append(&entry("棚卸し", "group/alpha", 6))
+            .expect("追記");
 
         let got = f
             .service
@@ -555,7 +567,9 @@ mod tests {
         let f = fixture();
         let store = HistoryStore::new(f.config.paths().history());
         for day in [1u32, 15, 31] {
-            store.append(&entry("月次報告", "group/alpha", day)).expect("追記");
+            store
+                .append(&entry("月次報告", "group/alpha", day))
+                .expect("追記");
         }
         let got = f
             .service
@@ -574,8 +588,12 @@ mod tests {
     fn masterdata_history_filter_by_project() {
         let f = fixture();
         let store = HistoryStore::new(f.config.paths().history());
-        store.append(&entry("月次報告", "group/alpha", 5)).expect("追記");
-        store.append(&entry("月次報告", "group/beta", 6)).expect("追記");
+        store
+            .append(&entry("月次報告", "group/alpha", 5))
+            .expect("追記");
+        store
+            .append(&entry("月次報告", "group/beta", 6))
+            .expect("追記");
         let got = f
             .service
             .list_history(&HistoryFilter {
@@ -593,7 +611,9 @@ mod tests {
         let f = fixture();
         let store = HistoryStore::new(f.config.paths().history());
         for day in [5u32, 12, 19] {
-            store.append(&entry("月次報告", "group/alpha", day)).expect("追記");
+            store
+                .append(&entry("月次報告", "group/alpha", day))
+                .expect("追記");
         }
         let got = f
             .service
@@ -629,7 +649,10 @@ mod tests {
         let text = confirmation.describe();
         assert!(text.contains("2 件"), "{text}");
         assert!(text.contains("登録候補"), "{text}");
-        assert!(text.contains("削除されません"), "GitLab 側が残ることが伝わらない: {text}");
+        assert!(
+            text.contains("削除されません"),
+            "GitLab 側が残ることが伝わらない: {text}"
+        );
     }
 
     /// FR-23: 選択した記録のみを削除する。
@@ -638,7 +661,9 @@ mod tests {
         let f = fixture();
         let store = HistoryStore::new(f.config.paths().history());
         for day in [5u32, 12, 19] {
-            store.append(&entry("月次報告", "group/alpha", day)).expect("追記");
+            store
+                .append(&entry("月次報告", "group/alpha", day))
+                .expect("追記");
         }
         let removed = f
             .service

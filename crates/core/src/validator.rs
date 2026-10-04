@@ -91,9 +91,7 @@ pub fn validate_schedule(schedule: &Schedule) -> Vec<Violation> {
         if start > due {
             v.push(Violation::new(
                 "開始日オフセット",
-                format!(
-                    "開始日が期限より後になります (開始日 {start} 日後、期限 {due} 日後)"
-                ),
+                format!("開始日が期限より後になります (開始日 {start} 日後、期限 {due} 日後)"),
             ));
         }
     }
@@ -260,7 +258,11 @@ mod tests {
         };
         let v = validate_schedule(&s256);
         assert!(fields(&v).contains(&"タイトル"));
-        assert!(v[0].reason.contains("256"), "現在の文字数を示す: {:?}", v[0]);
+        assert!(
+            v[0].reason.contains("256"),
+            "現在の文字数を示す: {:?}",
+            v[0]
+        );
     }
 
     /// EC-02: サロゲートペアで表される文字を 1 文字として数える。
@@ -325,7 +327,9 @@ mod tests {
         };
         let v = validate_schedule(&s);
         assert!(fields(&v).contains(&"開始日オフセット"));
-        assert!(v.iter().any(|x| x.reason.contains("10") && x.reason.contains("7")));
+        assert!(v
+            .iter()
+            .any(|x| x.reason.contains("10") && x.reason.contains("7")));
     }
 
     /// EC-36: 開始日と期限が等しい場合は通る。

@@ -20,3 +20,8 @@ chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+
+[features]
+# 配布用のビルドで指定する。画面 (ui/) を exe に埋め込み、開発サーバーを参照しない。
+# tauri-cli を使わずに `cargo build --release --features custom-protocol` で配布物を作るために置く。
+custom-protocol = ["tauri/custom-protocol"]

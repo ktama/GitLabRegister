@@ -136,7 +136,14 @@ impl std::fmt::Debug for SecretHolder {
     /// 表示に値を含めない。ログや画面に誤って出ることを防ぐ (NFR-07)。
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SecretHolder")
-            .field("token", &if self.has_token() { "(設定済み)" } else { "(未設定)" })
+            .field(
+                "token",
+                &if self.has_token() {
+                    "(設定済み)"
+                } else {
+                    "(未設定)"
+                },
+            )
             .field(
                 "proxy_credentials",
                 &if self.has_proxy_credentials() {

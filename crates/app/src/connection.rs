@@ -56,9 +56,9 @@ impl ConnectionState {
             ConnectionState::Unreachable { username } => {
                 format!("到達不能 (利用者 {username})。登録はできません")
             }
-            ConnectionState::VersionUnsupported { found } => format!(
-                "対応していないバージョンです (接続先 {found} / 必要なのは 19.2 以降)"
-            ),
+            ConnectionState::VersionUnsupported { found } => {
+                format!("対応していないバージョンです (接続先 {found} / 必要なのは 19.2 以降)")
+            }
         }
     }
 }
@@ -224,10 +224,7 @@ impl ConnectionService {
     }
 }
 
-fn to_proxy_choice(
-    settings: &AppSettings,
-    credentials: Option<(String, String)>,
-) -> ProxyChoice {
+fn to_proxy_choice(settings: &AppSettings, credentials: Option<(String, String)>) -> ProxyChoice {
     match settings.proxy.mode {
         ProxyMode::FollowSystem => ProxyChoice::FollowSystem,
         ProxyMode::Direct => ProxyChoice::Direct,
@@ -274,7 +271,11 @@ mod tests {
         let outcome = s.connect(&client).await.expect("接続できる");
         assert!(outcome.state.can_register());
         assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
-        assert!(s.state().describe().contains("taro"), "{}", s.state().describe());
+        assert!(
+            s.state().describe().contains("taro"),
+            "{}",
+            s.state().describe()
+        );
         assert!(s.state().describe().contains("19.2.1"));
     }
 
@@ -328,7 +329,10 @@ mod tests {
         let outcome = s.connect(&client).await.expect("接続できる");
         assert!(outcome.state.allows_ee_fields());
         assert!(
-            outcome.warnings.iter().any(|w| w.contains("判定できません")),
+            outcome
+                .warnings
+                .iter()
+                .any(|w| w.contains("判定できません")),
             "{:?}",
             outcome.warnings
         );
@@ -365,7 +369,11 @@ mod tests {
         s.mark_unreachable();
         assert!(!s.state().can_register());
         assert!(!s.state().can_fetch_candidates());
-        assert!(s.state().describe().contains("taro"), "{}", s.state().describe());
+        assert!(
+            s.state().describe().contains("taro"),
+            "{}",
+            s.state().describe()
+        );
     }
 
     /// EC-11: 実行中に失効した場合も秘密情報を破棄して未接続へ戻す。

@@ -34,9 +34,7 @@ impl Freshness {
                 "{} に取得した内容を表示しています。最新でない可能性があります",
                 fetched_at.format("%Y-%m-%d %H:%M")
             ),
-            Freshness::NeverFetched => {
-                "候補を取得していません。値を直接入力してください".into()
-            }
+            Freshness::NeverFetched => "候補を取得していません。値を直接入力してください".into(),
         }
     }
 }
@@ -93,11 +91,7 @@ impl CandidateService {
     }
 
     /// 保持している候補を返す。取得は行わない (EC-19)。
-    pub fn cached(
-        &self,
-        project: &str,
-        kind: CandidateKind,
-    ) -> Result<CandidateList, StoreError> {
+    pub fn cached(&self, project: &str, kind: CandidateKind) -> Result<CandidateList, StoreError> {
         let entries = self.config.load_candidates()?;
         Ok(match find(&entries, project, kind) {
             Some(entry) => CandidateList {
@@ -148,12 +142,10 @@ impl CandidateService {
         match self.fetch(client, project, kind, now).await {
             Ok(list) => Ok(list),
             Err(error) => {
-                let fallback = self
-                    .cached(project, kind)
-                    .unwrap_or(CandidateList {
-                        items: Vec::new(),
-                        freshness: Freshness::NeverFetched,
-                    });
+                let fallback = self.cached(project, kind).unwrap_or(CandidateList {
+                    items: Vec::new(),
+                    freshness: Freshness::NeverFetched,
+                });
                 Err((fallback, error))
             }
         }
@@ -257,7 +249,9 @@ mod tests {
             iteration("late", (2026, 10, 8), (2026, 10, 21)),
             iteration("early", (2026, 10, 1), (2026, 10, 14)),
         ]);
-        let got = list.iteration_containing(ymd(2026, 10, 10)).map(|c| c.id.as_str());
+        let got = list
+            .iteration_containing(ymd(2026, 10, 10))
+            .map(|c| c.id.as_str());
         assert_eq!(got, Some("early"));
     }
     use gitlabregister_infra::gitlab::transport::TransportError;
@@ -291,10 +285,7 @@ mod tests {
         }
     }
 
-    fn labels() -> Result<
-        gitlabregister_infra::gitlab::transport::HttpResponse,
-        TransportError,
-    > {
+    fn labels() -> Result<gitlabregister_infra::gitlab::transport::HttpResponse, TransportError> {
         ok(r#"[{"id":1,"name":"report"},{"id":2,"name":"monthly"}]"#)
     }
 
@@ -308,7 +299,10 @@ mod tests {
             .ensure(&client, "group/alpha", CandidateKind::Label, now())
             .await
             .expect("取得できる");
-        assert_eq!(list.names(), vec!["report".to_string(), "monthly".to_string()]);
+        assert_eq!(
+            list.names(),
+            vec!["report".to_string(), "monthly".to_string()]
+        );
         assert_eq!(list.freshness, Freshness::JustFetched { at: now() });
         assert_eq!(client.transport().sent_count(), 1);
     }
@@ -329,12 +323,7 @@ mod tests {
             .ensure(&second, "group/alpha", CandidateKind::Label, later())
             .await
             .expect("保持分を返す");
-        assert_eq!(
-            list.freshness,
-            Freshness::Cached {
-                fetched_at: now()
-            }
-        );
+        assert_eq!(list.freshness, Freshness::Cached { fetched_at: now() });
         assert_eq!(second.transport().sent_count(), 0, "再取得してはいけない");
     }
 
@@ -358,7 +347,11 @@ mod tests {
             Freshness::Cached { fetched_at } => assert_eq!(fetched_at, now()),
             other => panic!("保持分として扱われていない: {other:?}"),
         }
-        assert!(list.freshness.describe().contains("最新でない"), "{}", list.freshness.describe());
+        assert!(
+            list.freshness.describe().contains("最新でない"),
+            "{}",
+            list.freshness.describe()
+        );
 
         // 再取得に失敗しても保持分を返す。
         let (fallback, error) = f
@@ -457,7 +450,12 @@ mod tests {
         let member_client = client_with(vec![ok(r#"[{"id":7,"username":"taro"}]"#)]);
         let list = f
             .service
-            .ensure(&member_client, "group/alpha", CandidateKind::Member, later())
+            .ensure(
+                &member_client,
+                "group/alpha",
+                CandidateKind::Member,
+                later(),
+            )
             .await
             .expect("取得できる");
         assert_eq!(list.names(), vec!["taro".to_string()]);
